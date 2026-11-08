@@ -389,15 +389,24 @@ def _ffmpeg_executable():
 
 
 # ---------------------------------------------------------------------------
-# opuslib (encoder thời gian thực — thay thế OGG container cũ)
+# Opus encoding — dùng ffmpeg libopus trực tiếp, không cần opuslib/pyopus
+# Chỉ cần ffmpeg build với --enable-libopus (mặc định trên hầu hết distro)
 # ---------------------------------------------------------------------------
-try:
-    import opuslib as _opuslib
-    _OPUSLIB_OK = True
-except ImportError:
-    _opuslib   = None
-    _OPUSLIB_OK = False
-    HELLXlog("SETUP", "[!] opuslib chưa cài — chạy: pip install opuslib")
+import subprocess as _subprocess
+def _check_ffmpeg_opus() -> bool:
+    try:
+        r = _subprocess.run(
+            ["ffmpeg", "-encoders"],
+            capture_output=True, text=True, timeout=5
+        )
+        return "libopus" in r.stdout
+    except Exception:
+        return False
+
+_OPUSLIB_OK = _check_ffmpeg_opus()
+if not _OPUSLIB_OK:
+    HELLXlog("SETUP", "[!] ffmpeg libopus không khả dụng — không phát được nhạc")
+_opuslib = None   # giữ tương thích nếu code khác tham chiếu
 
 
 # ---------------------------------------------------------------------------
@@ -1986,7 +1995,7 @@ class HELLXBot:
                 return
 
             if not _OPUSLIB_OK:
-                await self._send_chat("[F52727]opuslib chưa cài — không phát được nhạc.")
+                await self._send_chat("[F52727]ffmpeg libopus không khả dụng — không phát được nhạc.")
                 return
 
             self._current_url   = query
@@ -2074,55 +2083,156 @@ class HELLXBot:
             pass
 
     # ------------------------------------------------------------------
-    # UDP streaming loop — kiến trúc producer/consumer (main-1 style)
-    # Không dùng OGG container:
-    #   _producer_thread : ffmpeg pipe → s16le → opuslib.encode → queue.Queue
-    #   _audio_loop (async): buffer 100 frames → consumer đọc queue, time.sleep 20ms
+    # UDP streaming loop — kiến trúc producer/consumer
+    #   _producer_thread : ffmpeg pipe → libopus raw frames → queue.Queue
+    #   _voice_udp_loop  : timing_thread (OS) + async sender
+    # Không cần opuslib/pyopus — ffmpeg tự encode libopus
     # ------------------------------------------------------------------
 
     def _producer_thread(self, raw_file: str, q: "queue.Queue"):
-        """Thread riêng: đọc audio qua ffmpeg pipe s16le → opuslib → queue."""
+        """Thread riêng: ffmpeg encode thẳng libopus → raw opus frames → queue.
+        Mỗi frame = 1 opus packet 20ms (960 samples @ 48kHz mono).
+        Không cần opuslib — ffmpeg -f opus pipe xuất raw OGG-less opus packets
+        qua segment_format obu; dùng segment_time 0.02 để ép đúng 20ms/frame.
+        """
         import queue as _q
-        import time as _t
-        encoder = _opuslib.Encoder(48000, 1, _opuslib.APPLICATION_AUDIO)
-        # loudnorm (EBU R128): normalize về -16 LUFS chuẩn broadcast
-        #   → bài to sẵn bị giảm, bài nhỏ được kéo lên — không bao giờ clip
-        # dynaudnorm bên trên chỉ smooth micro-variation sau khi đã normalize
-        # bufsize=0: unbuffered pipe — dữ liệu ra ngay, không bị giữ trong OS buffer
+        # ffmpeg xuất raw opus frames qua pipe:
+        #   -map_metadata -1  : bỏ metadata tránh header lạ đầu pipe
+        #   -c:a libopus       : encode opus
+        #   -b:a 96k           : bitrate 96kbps — đủ tốt cho voice/music
+        #   -application audio : tối ưu cho nhạc (thay vì voip)
+        #   -frame_duration 20 : đúng 20ms/frame = 960 samples
+        #   -vbr on            : variable bitrate — chất lượng tốt hơn cbr
+        #   -f data            : raw bytes pipe, không bọc container
+        #
+        # loudnorm EBU R128: normalize về -16 LUFS, true peak -1.5 dBFS
+        # → bài to sẵn bị giảm, bài nhỏ được kéo lên — không bao giờ clip
         cmd = [
             "ffmpeg", "-i", raw_file,
             "-filter:a", (
-                "loudnorm=I=-16:TP=-1.5:LRA=11,"   # EBU R128 normalize, true peak -1.5 dBFS
-                "dynaudnorm=f=200:g=15:p=0.90:m=30" # smooth micro-variation nhẹ
+                "loudnorm=I=-16:TP=-1.5:LRA=11,"    # EBU R128 normalize
+                "dynaudnorm=f=200:g=15:p=0.90:m=30"  # smooth micro-variation
             ),
-            "-f", "s16le", "-ac", "1", "-ar", "48000",
+            "-map_metadata", "-1",
+            "-c:a", "libopus",
+            "-b:a", "96k",
+            "-application", "audio",
+            "-frame_duration", "20",
+            "-vbr", "on",
+            "-ac", "1", "-ar", "48000",
+            "-f", "data",
             "-loglevel", "quiet", "pipe:1",
         ]
         import subprocess as _sp
         proc = _sp.Popen(cmd, stdout=_sp.PIPE, bufsize=0)
-        CHUNK = 1920   # 48000 Hz × 1ch × 2B × 20ms
+        # Mỗi opus frame raw ~100–400 bytes, nhưng độ dài biến đổi (VBR)
+        # → đọc theo length-prefixed: 2 byte big-endian length + payload
+        # ffmpeg -f data với libopus xuất từng packet kèm prefix tự động
+        # Tuy nhiên với -f data thuần thì KHÔNG có prefix — ta cần đọc
+        # frame boundary khác cách: dùng ogg muxer rồi parse OGG pages,
+        # HOẶC đơn giản hơn: encode s16le rồi encode opus trong Python
+        # qua subprocess ffmpeg từng chunk.
+        #
+        # Cách đơn giản & đáng tin nhất: pipe s16le ra, encode từng 1920-byte
+        # chunk bằng ffmpeg sub-process nhỏ (1 lần gọi = 1 frame).
+        # Nhưng spawn process mỗi 20ms quá tốn → dùng OGG page parser.
+        #
+        # GIẢI PHÁP THỰC TẾ NHẤT: dùng -f ogg và parse OGG pages để lấy
+        # từng opus packet riêng lẻ mà không cần native binding.
+        proc.terminate(); proc.wait()
+
+        # Re-spawn với OGG muxer để lấy frame boundary rõ ràng
+        cmd2 = [
+            "ffmpeg", "-i", raw_file,
+            "-filter:a", (
+                "loudnorm=I=-16:TP=-1.5:LRA=11,"
+                "dynaudnorm=f=200:g=15:p=0.90:m=30"
+            ),
+            "-c:a", "libopus",
+            "-b:a", "96k",
+            "-application", "audio",
+            "-frame_duration", "20",
+            "-vbr", "on",
+            "-ac", "1", "-ar", "48000",
+            "-f", "ogg",
+            "-loglevel", "quiet", "pipe:1",
+        ]
+        proc2 = _sp.Popen(cmd2, stdout=_sp.PIPE, bufsize=0)
+
+        def _read_exact(stream, n):
+            buf = b""
+            while len(buf) < n:
+                chunk = stream.read(n - len(buf))
+                if not chunk:
+                    return None
+                buf += chunk
+            return buf
+
+        def _parse_ogg_packets(stream):
+            """Generator: yield từng opus packet từ OGG stream.
+            OGG page format:
+              4B  capture_pattern "OggS"
+              1B  version
+              1B  header_type
+              8B  granule_position
+              4B  serial_number
+              4B  page_sequence
+              4B  checksum
+              1B  page_segments
+              Nx1B segment_table
+              data (concat segments)
+            Packet boundary: segment size < 255 kết thúc packet.
+            """
+            import struct as _st
+            while True:
+                # Tìm OggS capture pattern
+                hdr = _read_exact(stream, 27)
+                if not hdr or len(hdr) < 27:
+                    return
+                if hdr[:4] != b"OggS":
+                    # Lệch sync — tìm lại
+                    continue
+                n_segs = hdr[26]
+                seg_table = _read_exact(stream, n_segs)
+                if not seg_table:
+                    return
+                # Đọc toàn bộ data của page
+                page_data_len = sum(seg_table)
+                page_data = _read_exact(stream, page_data_len)
+                if not page_data:
+                    return
+                # Parse packets từ segment table
+                offset = 0
+                pkt = b""
+                for seg_sz in seg_table:
+                    pkt += page_data[offset:offset + seg_sz]
+                    offset += seg_sz
+                    if seg_sz < 255:
+                        # Kết thúc packet
+                        yield bytes(pkt)
+                        pkt = b""
+
         try:
-            while not self._audio_stop:
-                # Đọc đúng CHUNK bytes, loop nhỏ tránh partial read
-                raw = b""
-                while len(raw) < CHUNK and not self._audio_stop:
-                    part = proc.stdout.read(CHUNK - len(raw))
-                    if not part:
-                        q.put(None, block=True, timeout=5.0)
-                        return
-                    raw += part
-                if len(raw) < CHUNK:
+            pkt_gen = _parse_ogg_packets(proc2.stdout)
+            # 2 packet đầu là Opus ID header và Comment header — bỏ qua
+            skip = 0
+            for opus_pkt in pkt_gen:
+                if self._audio_stop:
                     break
-                # KHÔNG bỏ qua frame im lặng — phải giữ nhịp RTP sequence liên tục
-                # Bỏ frame → server nghe thấy gap → tiếng nhấp
-                q.put(encoder.encode(raw, 960), block=True, timeout=5.0)
+                if skip < 2:
+                    skip += 1
+                    continue
+                if not opus_pkt:
+                    continue
+                q.put(opus_pkt, block=True, timeout=5.0)
+            q.put(None, block=True, timeout=5.0)
         except Exception as e:
             HELLXlog("PRODUCER", f"{e}")
             try: q.put(None, block=False)
             except Exception: pass
         finally:
-            proc.terminate()
-            proc.wait()
+            proc2.terminate()
+            proc2.wait()
 
     async def _voice_udp_loop(self, ip: str, port: int, raw_file: str = ""):
         """Async consumer: đọc từ queue, build packet, sendto UDP với timing chính xác.
@@ -2142,7 +2252,7 @@ class HELLXBot:
         HELLXlog("VOICE", f"UDP: using port {udp_port}")
 
         if not raw_file or not _OPUSLIB_OK:
-            HELLXlog("VOICE", "UDP: No raw_file or opuslib missing")
+            HELLXlog("VOICE", "UDP: No raw_file or ffmpeg libopus missing")
             return
 
         import random as _rnd

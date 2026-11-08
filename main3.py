@@ -802,6 +802,7 @@ class HELLXBot:
                                 self._voice_connect_task = asyncio.create_task(self._voice_connect())
 
                     # Parse squad member UIDs từ field5["6"] (member list)
+                    # FIX: luôn update kể cả khi member leave → squad chỉ còn owner
                     if isinstance(field5, dict):
                         msg_type = proto_data.get("4")
                         if isinstance(msg_type, (int, str)) and int(str(msg_type) or 0) in (3, 6, 8, 44, 56):
@@ -816,9 +817,16 @@ class HELLXBot:
                                         mid = m.get("1")
                                         if mid and str(mid).isdigit():
                                             uids.append(int(mid))
-                            if uids:
-                                self._squad_uids = list(set(uids))
-                                HELLXlog("TEAM", f"squad_uids updated: {self._squad_uids}")
+                            # FIX: luôn đảm bảo team_owner_uid có trong list
+                            # Tránh bug: người chơi leave → member list chỉ còn owner
+                            # nhưng owner bị thiếu do parse sai field
+                            if self.team_owner_uid and self.team_owner_uid not in uids:
+                                uids.append(self.team_owner_uid)
+                            # FIX: update bất kể list có 1 người hay nhiều người
+                            # Code cũ: "if uids" đúng nhưng thiếu trường hợp
+                            # owner leave → uids rỗng → squad_uids không reset
+                            self._squad_uids = list(set(uids))
+                            HELLXlog("TEAM", f"squad_uids updated: {self._squad_uids}")
 
                 except Exception:
                     pass
@@ -1603,12 +1611,17 @@ class HELLXBot:
         return bytes([0x05, self._region_code]) + struct.pack(">I", len(enc)) + enc
 
     async def _trigger_emote(self, emote_id: int = None):
-        """Gửi 1 emote cho tất cả member trong squad + chính bot."""
+        """Gửi 1 emote cho tất cả member trong squad + chính bot.
+        FIX: luôn include team_owner_uid — tránh owner mất emote sau khi người khác leave."""
         try:
             if not self.writer or self.writer.transport.is_closing():
                 return
             bot_uid = self.account_uid or int(self.uid)
-            uids = list(set(self._squad_uids + [bot_uid]))
+            # Gom đủ: squad list hiện tại + bot + owner (tránh thiếu owner khi member leave)
+            must_have = [bot_uid]
+            if self.team_owner_uid:
+                must_have.append(int(self.team_owner_uid))
+            uids = list(set(self._squad_uids + must_have))
             if not uids:
                 return
             eid = emote_id or (self._emote_ids[0] if self._emote_ids else 909054004)

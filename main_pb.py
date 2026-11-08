@@ -2298,188 +2298,201 @@ async def run_telegram_bot(token: str, active_bots: list):
                             continue
                         HELLXlog("TELEGRAM", f"CMD: {text!r} from chat_id={chat_id}")
 
-                    # ── /start ──────────────────────────────────────────
-                    if text == "/start":
-                        await send(chat_id,
-                            "┌─────────────────────────┐\n"
-                            "│  🤖  <b>TCP BOT — Free Fire</b>  │\n"
-                            "└─────────────────────────┘\n\n"
-                            "🎵 <b>PHÁT NHẠC</b>\n"
-                            "├ <code>/search [tên bài]</code> — tìm NhacCuaTui\n"
-                            "├ <code>/search yt [tên]</code> — tìm YouTube\n"
-                            "├ <code>/join [code]</code> — vào team\n"
-                            "├ <code>/join [code] [số]</code> — vào team + phát bài\n"
-                            "├ <code>/play [tên/URL]</code> — thêm hàng chờ\n"
-                            "├ <code>/skip</code> — bỏ bài đang phát\n"
-                            "├ <code>/queue</code> — xem hàng chờ\n"
-                            "└ <code>/clear</code> — xóa toàn bộ hàng chờ\n\n"
-                            "💃 <b>NHẢY EMOTE</b>\n"
-                            "└ <code>/pb [team_code]</code> — bot vào team nhảy liên tục\n\n"
-                            "🔧 <b>QUẢN LÝ</b>\n"
-                            "├ <code>/leave</code> — bot rời team\n"
-                            "└ <code>/status</code> — xem trạng thái tất cả bot\n\n"
-                            "🎮 <b>LỆNH TRONG GAME</b> <i>(chat tổ đội)</i>\n"
-                            "<code>!play</code>  <code>!skip</code>  <code>!queue</code>  <code>!clear</code>  <code>!volume [0-200]</code>  <code>!leave</code>",
-                            user_msg_id=user_msg_id
-                        )
-
-                    # ── /search ─────────────────────────────────────────
-                    # Prefix: "yt " → YouTube, "ct " → NhacCuaTui, không prefix → NCT
-                    elif text.lower().startswith("/search"):
-                        raw_query = text[7:].strip()
-                        if not raw_query:
+                        # ── /start ──────────────────────────────────────────
+                        if text == "/start":
                             await send(chat_id,
-                                "❌ <b>Thiếu từ khoá tìm kiếm!</b>\n\n"
-                                "📖 <b>Cú pháp:</b>\n"
+                                "┌─────────────────────────┐\n"
+                                "│  🤖  <b>TCP BOT — Free Fire</b>  │\n"
+                                "└─────────────────────────┘\n\n"
+                                "🎵 <b>PHÁT NHẠC</b>\n"
                                 "├ <code>/search [tên bài]</code> — tìm NhacCuaTui\n"
-                                "├ <code>/search ct [tên bài]</code> — tìm NhacCuaTui\n"
-                                "└ <code>/search yt [tên bài]</code> — tìm YouTube",
-                                user_msg_id=user_msg_id)
-                            continue
+                                "├ <code>/search yt [tên]</code> — tìm YouTube\n"
+                                "├ <code>/join [code]</code> — vào team\n"
+                                "├ <code>/join [code] [số]</code> — vào team + phát bài\n"
+                                "├ <code>/play [tên/URL]</code> — thêm hàng chờ\n"
+                                "├ <code>/skip</code> — bỏ bài đang phát\n"
+                                "├ <code>/queue</code> — xem hàng chờ\n"
+                                "└ <code>/clear</code> — xóa toàn bộ hàng chờ\n\n"
+                                "💃 <b>NHẢY EMOTE</b>\n"
+                                "└ <code>/pb [team_code]</code> — bot vào team nhảy liên tục\n\n"
+                                "🔧 <b>QUẢN LÝ</b>\n"
+                                "├ <code>/leave</code> — bot rời team\n"
+                                "└ <code>/status</code> — xem trạng thái tất cả bot\n\n"
+                                "🎮 <b>LỆNH TRONG GAME</b> <i>(chat tổ đội)</i>\n"
+                                "<code>!play</code>  <code>!skip</code>  <code>!queue</code>  <code>!clear</code>  <code>!volume [0-200]</code>  <code>!leave</code>",
+                                user_msg_id=user_msg_id
+                            )
 
-                        # Phân tích prefix
-                        lower_q = raw_query.lower()
-                        if lower_q.startswith("yt "):
-                            force_source = "youtube"
-                            query = raw_query[3:].strip()
-                        elif lower_q.startswith("ct "):
-                            force_source = "nct"
-                            query = raw_query[3:].strip()
-                        else:
-                            force_source = "nct"   # mặc định NCT
-                            query = raw_query
-
-                        if not query:
-                            await send(chat_id, "❌ <b>Thiếu tên bài!</b>\n└ Nhập tên bài sau prefix.", user_msg_id=user_msg_id)
-                            continue
-
-                        src_label = "NhacCuaTui" if force_source == "nct" else "YouTube"
-                        src_icon  = "🎵" if force_source == "nct" else "▶️"
-                        await send(chat_id, f"{src_icon} <b>Đang tìm kiếm…</b>\n└ Nguồn: <b>{src_label}</b> — <i>{query}</i>", user_msg_id=user_msg_id)
-
-                        try:
-                            if force_source == "youtube":
-                                results = await _youtube_search_api(query, limit=10)
-                            else:
-                                results = await _nct_search(query, limit=5)
-                                if not results:
-                                    await send(chat_id,
-                                        f"😔 <b>NhacCuaTui</b> không có kết quả cho:\n"
-                                        f"└ <i>{query}</i>\n\n"
-                                        f"💡 <b>Thử tìm trên YouTube:</b>\n"
-                                        f"└ <code>/search yt {query}</code>",
-                                        user_msg_id=user_msg_id)
-                                    continue
-
-                            if not results:
-                                await send(chat_id, "😔 <b>Không tìm thấy kết quả nào.</b>\n└ Hãy thử từ khoá khác.", user_msg_id=user_msg_id)
+                        # ── /search ─────────────────────────────────────────
+                        # Prefix: "yt " → YouTube, "ct " → NhacCuaTui, không prefix → NCT
+                        elif text.lower().startswith("/search"):
+                            raw_query = text[7:].strip()
+                            if not raw_query:
+                                await send(chat_id,
+                                    "❌ <b>Thiếu từ khoá tìm kiếm!</b>\n\n"
+                                    "📖 <b>Cú pháp:</b>\n"
+                                    "├ <code>/search [tên bài]</code> — tìm NhacCuaTui\n"
+                                    "├ <code>/search ct [tên bài]</code> — tìm NhacCuaTui\n"
+                                    "└ <code>/search yt [tên bài]</code> — tìm YouTube",
+                                    user_msg_id=user_msg_id)
                                 continue
 
-                            search_cache[chat_id] = results
-                            source_tag = "🎵 <b>NhacCuaTui</b>" if results[0].get("source") == "nct" else "▶️ <b>YouTube</b>"
-                            lines = [
-                                f"┌── {source_tag} ──",
-                                f"│ 🔎 Kết quả: <i>{query}</i>",
-                                f"└──────────────────\n",
-                            ]
-                            for i, r in enumerate(results, 1):
-                                artist = r.get("artist") or r.get("channel") or "Unknown"
-                                lines.append(f"<b>{i}.</b> {r['title']}\n    <i>🎤 {artist}</i>  <code>⏱ {r['duration']}</code>")
-                            lines.append(f"\n▶️ <b>Phát nhạc:</b> <code>/join [team_code] [số thứ tự]</code>")
-                            await send(chat_id, "\n".join(lines), user_msg_id=user_msg_id)
-
-                        except Exception as e:
-                            HELLXlog("SEARCH", f"Lỗi: {e}")
-                            await send(chat_id, f"❌ <b>Tìm kiếm thất bại!</b>\n└ <code>{e}</code>", user_msg_id=user_msg_id)
-
-                    # ── /join ────────────────────────────────────────────
-                    elif text.lower().startswith("/join"):
-                        parts = text.split()
-                        # /join CODE           → join only (no play)
-                        # /join CODE 2         → join + play bài số 2 từ search_cache
-                        # /join CODE https://… → join + play URL trực tiếp
-                        if len(parts) < 2:
-                            await send(chat_id,
-                                "❌ <b>Thiếu team code!</b>\n\n"
-                                "📖 <b>Cú pháp:</b>\n"
-                                "├ <code>/join [team_code]</code>\n"
-                                "└ <code>/join [team_code] [số thứ tự]</code>",
-                                user_msg_id=user_msg_id)
-                            continue
-
-                        code        = parts[1]
-                        play_url    = None
-                        play_title  = ""
-
-                        if len(parts) >= 3:
-                            arg = parts[2]
-                            if arg.startswith("http"):
-                                play_url   = arg
-                                play_title = arg
+                            # Phân tích prefix
+                            lower_q = raw_query.lower()
+                            if lower_q.startswith("yt "):
+                                force_source = "youtube"
+                                query = raw_query[3:].strip()
+                            elif lower_q.startswith("ct "):
+                                force_source = "nct"
+                                query = raw_query[3:].strip()
                             else:
-                                try:
-                                    idx    = int(arg) - 1
-                                    cached = search_cache.get(chat_id, [])
-                                    if idx < 0 or idx >= len(cached):
+                                force_source = "nct"   # mặc định NCT
+                                query = raw_query
+
+                            if not query:
+                                await send(chat_id, "❌ <b>Thiếu tên bài!</b>\n└ Nhập tên bài sau prefix.", user_msg_id=user_msg_id)
+                                continue
+
+                            src_label = "NhacCuaTui" if force_source == "nct" else "YouTube"
+                            src_icon  = "🎵" if force_source == "nct" else "▶️"
+                            await send(chat_id, f"{src_icon} <b>Đang tìm kiếm…</b>\n└ Nguồn: <b>{src_label}</b> — <i>{query}</i>", user_msg_id=user_msg_id)
+
+                            try:
+                                if force_source == "youtube":
+                                    results = await _youtube_search_api(query, limit=10)
+                                else:
+                                    results = await _nct_search(query, limit=5)
+                                    if not results:
                                         await send(chat_id,
-                                            "❌ <b>Số thứ tự không hợp lệ!</b>\n"
-                                            "└ Hãy dùng <code>/search</code> để tìm bài trước.",
+                                            f"😔 <b>NhacCuaTui</b> không có kết quả cho:\n"
+                                            f"└ <i>{query}</i>\n\n"
+                                            f"💡 <b>Thử tìm trên YouTube:</b>\n"
+                                            f"└ <code>/search yt {query}</code>",
                                             user_msg_id=user_msg_id)
                                         continue
-                                    play_url   = cached[idx]["url"]
-                                    play_title = cached[idx]["title"]
-                                except ValueError:
-                                    await send(chat_id,
-                                        "❌ <b>Tham số không hợp lệ!</b>\n"
-                                        "└ Phải là <b>số thứ tự</b> (1, 2, 3…) hoặc <b>URL</b>.",
-                                        user_msg_id=user_msg_id)
+
+                                if not results:
+                                    await send(chat_id, "😔 <b>Không tìm thấy kết quả nào.</b>\n└ Hãy thử từ khoá khác.", user_msg_id=user_msg_id)
                                     continue
 
-                        # Tìm bot rảnh — check cả _joining tránh spam /join
-                        count = 0
-                        for bot in active_bots:
-                            if bot.writer and not bot.writer.transport.is_closing():
-                                if not bot.voice_region_id and not bot._joining:
-                                    try:
-                                        join_pkt = HELLXbuild_join_sq(int(bot.uid), code, bot.key, bot.iv)
-                                        bot.writer.write(join_pkt)
-                                        await bot.writer.drain()
-                                        count += 1
-                                        bot._telegram_chat_id = chat_id
-                                        bot._joining          = True
+                                search_cache[chat_id] = results
+                                source_tag = "🎵 <b>NhacCuaTui</b>" if results[0].get("source") == "nct" else "▶️ <b>YouTube</b>"
+                                lines = [
+                                    f"┌── {source_tag} ──",
+                                    f"│ 🔎 Kết quả: <i>{query}</i>",
+                                    f"└──────────────────\n",
+                                ]
+                                for i, r in enumerate(results, 1):
+                                    artist = r.get("artist") or r.get("channel") or "Unknown"
+                                    lines.append(f"<b>{i}.</b> {r['title']}\n    <i>🎤 {artist}</i>  <code>⏱ {r['duration']}</code>")
+                                lines.append(f"\n▶️ <b>Phát nhạc:</b> <code>/join [team_code] [số thứ tự]</code>")
+                                await send(chat_id, "\n".join(lines), user_msg_id=user_msg_id)
 
-                                        async def _check(b=bot, c=chat_id, tc=code, url=play_url, title=play_title, umid=user_msg_id):
-                                            b._join_success = False
-                                            # Poll 6s thay vì sleep cứng 3s
-                                            for _i in range(12):
-                                                await asyncio.sleep(0.5)
-                                                if b._join_success:
-                                                    break
-                                            b._joining = False
-                                            async with aiohttp.ClientSession() as s:
-                                                if b._join_success:
-                                                    if url:
-                                                        r = await s.post(send_url, json={
-                                                            "chat_id": c,
-                                                            "text": (
-                                                                f"✅ <b>Đã vào team thành công!</b>\n"
-                                                                f"├ Mã: <code>{tc}</code>\n"
-                                                                f"└ 🎵 Đang tải: <i>{title[:60]}</i>"
-                                                            ),
-                                                            "parse_mode": "HTML",
-                                                        })
-                                                        rd = await r.json()
-                                                        bot_mid = rd.get("result", {}).get("message_id")
-                                                        if bot_mid:
-                                                            asyncio.create_task(_delete_after(c, bot_mid, *([umid] if umid else [])))
-                                                        asyncio.create_task(b._play_from_url(url, title))
+                            except Exception as e:
+                                HELLXlog("SEARCH", f"Lỗi: {e}")
+                                await send(chat_id, f"❌ <b>Tìm kiếm thất bại!</b>\n└ <code>{e}</code>", user_msg_id=user_msg_id)
+
+                        # ── /join ────────────────────────────────────────────
+                        elif text.lower().startswith("/join"):
+                            parts = text.split()
+                            # /join CODE           → join only (no play)
+                            # /join CODE 2         → join + play bài số 2 từ search_cache
+                            # /join CODE https://… → join + play URL trực tiếp
+                            if len(parts) < 2:
+                                await send(chat_id,
+                                    "❌ <b>Thiếu team code!</b>\n\n"
+                                    "📖 <b>Cú pháp:</b>\n"
+                                    "├ <code>/join [team_code]</code>\n"
+                                    "└ <code>/join [team_code] [số thứ tự]</code>",
+                                    user_msg_id=user_msg_id)
+                                continue
+
+                            code        = parts[1]
+                            play_url    = None
+                            play_title  = ""
+
+                            if len(parts) >= 3:
+                                arg = parts[2]
+                                if arg.startswith("http"):
+                                    play_url   = arg
+                                    play_title = arg
+                                else:
+                                    try:
+                                        idx    = int(arg) - 1
+                                        cached = search_cache.get(chat_id, [])
+                                        if idx < 0 or idx >= len(cached):
+                                            await send(chat_id,
+                                                "❌ <b>Số thứ tự không hợp lệ!</b>\n"
+                                                "└ Hãy dùng <code>/search</code> để tìm bài trước.",
+                                                user_msg_id=user_msg_id)
+                                            continue
+                                        play_url   = cached[idx]["url"]
+                                        play_title = cached[idx]["title"]
+                                    except ValueError:
+                                        await send(chat_id,
+                                            "❌ <b>Tham số không hợp lệ!</b>\n"
+                                            "└ Phải là <b>số thứ tự</b> (1, 2, 3…) hoặc <b>URL</b>.",
+                                            user_msg_id=user_msg_id)
+                                        continue
+
+                            # Tìm bot rảnh — check cả _joining tránh spam /join
+                            count = 0
+                            for bot in active_bots:
+                                if bot.writer and not bot.writer.transport.is_closing():
+                                    if not bot.voice_region_id and not bot._joining:
+                                        try:
+                                            join_pkt = HELLXbuild_join_sq(int(bot.uid), code, bot.key, bot.iv)
+                                            bot.writer.write(join_pkt)
+                                            await bot.writer.drain()
+                                            count += 1
+                                            bot._telegram_chat_id = chat_id
+                                            bot._joining          = True
+
+                                            async def _check(b=bot, c=chat_id, tc=code, url=play_url, title=play_title, umid=user_msg_id):
+                                                b._join_success = False
+                                                # Poll 6s thay vì sleep cứng 3s
+                                                for _i in range(12):
+                                                    await asyncio.sleep(0.5)
+                                                    if b._join_success:
+                                                        break
+                                                b._joining = False
+                                                async with aiohttp.ClientSession() as s:
+                                                    if b._join_success:
+                                                        if url:
+                                                            r = await s.post(send_url, json={
+                                                                "chat_id": c,
+                                                                "text": (
+                                                                    f"✅ <b>Đã vào team thành công!</b>\n"
+                                                                    f"├ Mã: <code>{tc}</code>\n"
+                                                                    f"└ 🎵 Đang tải: <i>{title[:60]}</i>"
+                                                                ),
+                                                                "parse_mode": "HTML",
+                                                            })
+                                                            rd = await r.json()
+                                                            bot_mid = rd.get("result", {}).get("message_id")
+                                                            if bot_mid:
+                                                                asyncio.create_task(_delete_after(c, bot_mid, *([umid] if umid else [])))
+                                                            asyncio.create_task(b._play_from_url(url, title))
+                                                        else:
+                                                            r = await s.post(send_url, json={
+                                                                "chat_id": c,
+                                                                "text": (
+                                                                    f"✅ <b>Đã vào team thành công!</b>\n"
+                                                                    f"├ Mã: <code>{tc}</code>\n"
+                                                                    f"└ 💬 Chat <code>!play [bài hát]</code> trong game để phát nhạc."
+                                                                ),
+                                                                "parse_mode": "HTML",
+                                                            })
+                                                            rd = await r.json()
+                                                            bot_mid = rd.get("result", {}).get("message_id")
+                                                            if bot_mid:
+                                                                asyncio.create_task(_delete_after(c, bot_mid, *([umid] if umid else [])))
                                                     else:
                                                         r = await s.post(send_url, json={
                                                             "chat_id": c,
                                                             "text": (
-                                                                f"✅ <b>Đã vào team thành công!</b>\n"
-                                                                f"├ Mã: <code>{tc}</code>\n"
-                                                                f"└ 💬 Chat <code>!play [bài hát]</code> trong game để phát nhạc."
+                                                                f"❌ <b>Vào team thất bại!</b>\n"
+                                                                f"└ Team code không hợp lệ: <code>{tc}</code>"
                                                             ),
                                                             "parse_mode": "HTML",
                                                         })
@@ -2487,249 +2500,236 @@ async def run_telegram_bot(token: str, active_bots: list):
                                                         bot_mid = rd.get("result", {}).get("message_id")
                                                         if bot_mid:
                                                             asyncio.create_task(_delete_after(c, bot_mid, *([umid] if umid else [])))
-                                                else:
-                                                    r = await s.post(send_url, json={
-                                                        "chat_id": c,
-                                                        "text": (
-                                                            f"❌ <b>Vào team thất bại!</b>\n"
-                                                            f"└ Team code không hợp lệ: <code>{tc}</code>"
-                                                        ),
-                                                        "parse_mode": "HTML",
-                                                    })
-                                                    rd = await r.json()
-                                                    bot_mid = rd.get("result", {}).get("message_id")
-                                                    if bot_mid:
-                                                        asyncio.create_task(_delete_after(c, bot_mid, *([umid] if umid else [])))
 
-                                        asyncio.create_task(_check())
-                                        break   # một bot mỗi lần join
+                                            asyncio.create_task(_check())
+                                            break   # một bot mỗi lần join
 
-                                    except Exception as ex:
-                                        HELLXlog("TEAM", f"Join failed uid={bot.uid}: {ex}")
+                                        except Exception as ex:
+                                            HELLXlog("TEAM", f"Join failed uid={bot.uid}: {ex}")
 
-                        if count > 0:
-                            await send(chat_id, f"⏳ <b>Đang vào team…</b>\n└ Mã: <code>{code}</code>", user_msg_id=user_msg_id)
-                        else:
-                            my_joining = [b for b in active_bots if b._joining and b._telegram_chat_id == chat_id]
-                            my_busy    = [b for b in active_bots if b.voice_region_id and b._telegram_chat_id == chat_id]
-                            all_busy   = [b for b in active_bots if b.voice_region_id or b._joining]
-                            if my_joining:
-                                await send(chat_id, "⏳ <b>Bot của bạn đang xử lý lệnh trước.</b>\n└ Chờ vài giây rồi thử lại.", user_msg_id=user_msg_id)
-                            elif my_busy:
-                                await send(chat_id, "❌ <b>Bot của bạn đang trong team!</b>\n└ Dùng <code>/leave</code> trước.", user_msg_id=user_msg_id)
-                            elif all_busy:
-                                await send(chat_id, "❌ <b>Không có bot rảnh!</b>\n└ Tất cả bot đang được người khác sử dụng.", user_msg_id=user_msg_id)
+                            if count > 0:
+                                await send(chat_id, f"⏳ <b>Đang vào team…</b>\n└ Mã: <code>{code}</code>", user_msg_id=user_msg_id)
                             else:
-                                await send(chat_id, "❌ <b>Không có bot rảnh!</b>\n└ Dùng <code>/status</code> để kiểm tra.", user_msg_id=user_msg_id)
+                                my_joining = [b for b in active_bots if b._joining and b._telegram_chat_id == chat_id]
+                                my_busy    = [b for b in active_bots if b.voice_region_id and b._telegram_chat_id == chat_id]
+                                all_busy   = [b for b in active_bots if b.voice_region_id or b._joining]
+                                if my_joining:
+                                    await send(chat_id, "⏳ <b>Bot của bạn đang xử lý lệnh trước.</b>\n└ Chờ vài giây rồi thử lại.", user_msg_id=user_msg_id)
+                                elif my_busy:
+                                    await send(chat_id, "❌ <b>Bot của bạn đang trong team!</b>\n└ Dùng <code>/leave</code> trước.", user_msg_id=user_msg_id)
+                                elif all_busy:
+                                    await send(chat_id, "❌ <b>Không có bot rảnh!</b>\n└ Tất cả bot đang được người khác sử dụng.", user_msg_id=user_msg_id)
+                                else:
+                                    await send(chat_id, "❌ <b>Không có bot rảnh!</b>\n└ Dùng <code>/status</code> để kiểm tra.", user_msg_id=user_msg_id)
 
-                    # ── /pb TeamCode (join team + nhảy emote, không cần nhạc) ──
-                    elif text.lower().startswith("/pb"):
-                        parts = text.split()
-                        if len(parts) < 2:
-                            await send(chat_id,
-                                "❌ <b>Thiếu team code!</b>\n\n"
-                                "📖 <b>Cú pháp:</b> <code>/pb [team_code]</code>\n"
-                                "└ 💃 Bot vào team và nhảy emote liên tục, không cần nhạc.",
-                                user_msg_id=user_msg_id)
-                            continue
+                        # ── /pb TeamCode (join team + nhảy emote, không cần nhạc) ──
+                        elif text.lower().startswith("/pb"):
+                            parts = text.split()
+                            if len(parts) < 2:
+                                await send(chat_id,
+                                    "❌ <b>Thiếu team code!</b>\n\n"
+                                    "📖 <b>Cú pháp:</b> <code>/pb [team_code]</code>\n"
+                                    "└ 💃 Bot vào team và nhảy emote liên tục, không cần nhạc.",
+                                    user_msg_id=user_msg_id)
+                                continue
 
-                        pb_code = parts[1]
+                            pb_code = parts[1]
 
-                        # Tìm bot rảnh — phải check cả _joining để tránh gửi 2 lần
-                        # khi người dùng spam /pb trước khi lần 1 hoàn thành
-                        pb_count = 0
-                        for bot in active_bots:
-                            if bot.writer and not bot.writer.transport.is_closing():
-                                if not bot.voice_region_id and not bot._joining:
-                                    try:
-                                        join_pkt = HELLXbuild_join_sq(int(bot.uid), pb_code, bot.key, bot.iv)
-                                        bot.writer.write(join_pkt)
-                                        await bot.writer.drain()
-                                        pb_count += 1
-                                        bot._telegram_chat_id = chat_id
-                                        bot._telegram_notify_cb = send  # đảm bảo luôn mới nhất
-                                        bot._joining = True
+                            # Tìm bot rảnh — phải check cả _joining để tránh gửi 2 lần
+                            # khi người dùng spam /pb trước khi lần 1 hoàn thành
+                            pb_count = 0
+                            for bot in active_bots:
+                                if bot.writer and not bot.writer.transport.is_closing():
+                                    if not bot.voice_region_id and not bot._joining:
+                                        try:
+                                            join_pkt = HELLXbuild_join_sq(int(bot.uid), pb_code, bot.key, bot.iv)
+                                            bot.writer.write(join_pkt)
+                                            await bot.writer.drain()
+                                            pb_count += 1
+                                            bot._telegram_chat_id = chat_id
+                                            bot._telegram_notify_cb = send  # đảm bảo luôn mới nhất
+                                            bot._joining = True
 
-                                        async def _check_pb(b=bot, c=chat_id, tc=pb_code, umid=user_msg_id):
-                                            b._join_success = False
-                                            # Chờ tối đa 6s để nhận join confirm từ server
-                                            # (trước là 3s — dễ miss nếu server lag)
-                                            for _i in range(12):
-                                                await asyncio.sleep(0.5)
-                                                if b._join_success:
-                                                    break
-                                            b._joining = False
-                                            HELLXlog("PB", f"_check_pb: uid={b.uid} join_success={b._join_success} voice_region={b.voice_region_id}")
-                                            async with aiohttp.ClientSession() as s:
-                                                if b._join_success:
-                                                    b._pb_mode = True
-                                                    if b._pb_emote_task and not b._pb_emote_task.done():
-                                                        b._pb_emote_task.cancel()
-                                                    # Gửi welcome msg vào chat team (chạy song song với emote loop)
-                                                    # _pb_send_welcome tự chờ chat kết nối bên trong
-                                                    asyncio.create_task(b._pb_send_welcome())
-                                                    # Emote loop bắt đầu sau delay 3s — đủ thời gian welcome msg gửi trước
-                                                    b._pb_emote_task = asyncio.create_task(b._pb_emote_loop())
-                                                    r = await s.post(send_url, json={
-                                                        "chat_id": c,
-                                                        "text": (
-                                                            f"💃 <b>Đã vào team — đang nhảy emote!</b>\n"
-                                                            f"├ Mã: <code>{tc}</code>\n"
-                                                            f"├ 📨 Đã gửi tin chào vào chat tổ đội\n"
-                                                            f"├ ⚠️ Bot tự rời nếu chủ team thoát\n"
-                                                            f"└ 🛑 Dùng <code>/leave</code> để dừng"
-                                                        ),
-                                                        "parse_mode": "HTML",
-                                                    })
-                                                    rd = await r.json()
-                                                    bot_mid = rd.get("result", {}).get("message_id")
-                                                    if bot_mid:
-                                                        asyncio.create_task(_delete_after(c, bot_mid, *([umid] if umid else [])))
-                                                else:
-                                                    r = await s.post(send_url, json={
-                                                        "chat_id": c,
-                                                        "text": (
-                                                            f"❌ <b>Vào team thất bại!</b>\n"
-                                                            f"└ Team code không hợp lệ: <code>{tc}</code>"
-                                                        ),
-                                                        "parse_mode": "HTML",
-                                                    })
-                                                    rd = await r.json()
-                                                    bot_mid = rd.get("result", {}).get("message_id")
-                                                    if bot_mid:
-                                                        asyncio.create_task(_delete_after(c, bot_mid, *([umid] if umid else [])))
+                                            async def _check_pb(b=bot, c=chat_id, tc=pb_code, umid=user_msg_id):
+                                                b._join_success = False
+                                                # Chờ tối đa 6s để nhận join confirm từ server
+                                                # (trước là 3s — dễ miss nếu server lag)
+                                                for _i in range(12):
+                                                    await asyncio.sleep(0.5)
+                                                    if b._join_success:
+                                                        break
+                                                b._joining = False
+                                                HELLXlog("PB", f"_check_pb: uid={b.uid} join_success={b._join_success} voice_region={b.voice_region_id}")
+                                                async with aiohttp.ClientSession() as s:
+                                                    if b._join_success:
+                                                        b._pb_mode = True
+                                                        if b._pb_emote_task and not b._pb_emote_task.done():
+                                                            b._pb_emote_task.cancel()
+                                                        # Gửi welcome msg vào chat team (chạy song song với emote loop)
+                                                        # _pb_send_welcome tự chờ chat kết nối bên trong
+                                                        asyncio.create_task(b._pb_send_welcome())
+                                                        # Emote loop bắt đầu sau delay 3s — đủ thời gian welcome msg gửi trước
+                                                        b._pb_emote_task = asyncio.create_task(b._pb_emote_loop())
+                                                        r = await s.post(send_url, json={
+                                                            "chat_id": c,
+                                                            "text": (
+                                                                f"💃 <b>Đã vào team — đang nhảy emote!</b>\n"
+                                                                f"├ Mã: <code>{tc}</code>\n"
+                                                                f"├ 📨 Đã gửi tin chào vào chat tổ đội\n"
+                                                                f"├ ⚠️ Bot tự rời nếu chủ team thoát\n"
+                                                                f"└ 🛑 Dùng <code>/leave</code> để dừng"
+                                                            ),
+                                                            "parse_mode": "HTML",
+                                                        })
+                                                        rd = await r.json()
+                                                        bot_mid = rd.get("result", {}).get("message_id")
+                                                        if bot_mid:
+                                                            asyncio.create_task(_delete_after(c, bot_mid, *([umid] if umid else [])))
+                                                    else:
+                                                        r = await s.post(send_url, json={
+                                                            "chat_id": c,
+                                                            "text": (
+                                                                f"❌ <b>Vào team thất bại!</b>\n"
+                                                                f"└ Team code không hợp lệ: <code>{tc}</code>"
+                                                            ),
+                                                            "parse_mode": "HTML",
+                                                        })
+                                                        rd = await r.json()
+                                                        bot_mid = rd.get("result", {}).get("message_id")
+                                                        if bot_mid:
+                                                            asyncio.create_task(_delete_after(c, bot_mid, *([umid] if umid else [])))
 
-                                        asyncio.create_task(_check_pb())
-                                        break  # một bot mỗi lần join
+                                            asyncio.create_task(_check_pb())
+                                            break  # một bot mỗi lần join
 
-                                    except Exception as ex:
-                                        HELLXlog("TEAM", f"PB join failed uid={bot.uid}: {ex}")
+                                        except Exception as ex:
+                                            HELLXlog("TEAM", f"PB join failed uid={bot.uid}: {ex}")
 
-                        if pb_count > 0:
-                            await send(chat_id, f"⏳ <b>Đang vào team (emote mode)…</b>\n└ Mã: <code>{pb_code}</code>", user_msg_id=user_msg_id)
-                        else:
-                            my_joining = [b for b in active_bots if b._joining and b._telegram_chat_id == chat_id]
-                            my_busy    = [b for b in active_bots if b.voice_region_id and b._telegram_chat_id == chat_id]
-                            all_busy   = [b for b in active_bots if b.voice_region_id or b._joining]
-                            if my_joining:
-                                await send(chat_id, "⏳ <b>Bot của bạn đang xử lý lệnh trước.</b>\n└ Chờ vài giây rồi thử lại.", user_msg_id=user_msg_id)
-                            elif my_busy:
-                                await send(chat_id, "❌ <b>Bot của bạn đang trong team!</b>\n└ Dùng <code>/leave</code> trước.", user_msg_id=user_msg_id)
-                            elif all_busy:
-                                await send(chat_id, "❌ <b>Không có bot rảnh!</b>\n└ Tất cả bot đang được người khác sử dụng.", user_msg_id=user_msg_id)
+                            if pb_count > 0:
+                                await send(chat_id, f"⏳ <b>Đang vào team (emote mode)…</b>\n└ Mã: <code>{pb_code}</code>", user_msg_id=user_msg_id)
                             else:
-                                await send(chat_id, "❌ <b>Không có bot rảnh!</b>\n└ Dùng <code>/status</code> để kiểm tra.", user_msg_id=user_msg_id)
+                                my_joining = [b for b in active_bots if b._joining and b._telegram_chat_id == chat_id]
+                                my_busy    = [b for b in active_bots if b.voice_region_id and b._telegram_chat_id == chat_id]
+                                all_busy   = [b for b in active_bots if b.voice_region_id or b._joining]
+                                if my_joining:
+                                    await send(chat_id, "⏳ <b>Bot của bạn đang xử lý lệnh trước.</b>\n└ Chờ vài giây rồi thử lại.", user_msg_id=user_msg_id)
+                                elif my_busy:
+                                    await send(chat_id, "❌ <b>Bot của bạn đang trong team!</b>\n└ Dùng <code>/leave</code> trước.", user_msg_id=user_msg_id)
+                                elif all_busy:
+                                    await send(chat_id, "❌ <b>Không có bot rảnh!</b>\n└ Tất cả bot đang được người khác sử dụng.", user_msg_id=user_msg_id)
+                                else:
+                                    await send(chat_id, "❌ <b>Không có bot rảnh!</b>\n└ Dùng <code>/status</code> để kiểm tra.", user_msg_id=user_msg_id)
 
-                    # ── /play (direct, dành cho bot đang trong team của user) ──
-                    elif text.lower().startswith("/play"):
-                        query = text[5:].strip()
-                        if not query:
-                            await send(chat_id,
-                                "❌ <b>Thiếu tên bài hoặc URL!</b>\n"
-                                "└ <code>/play [tên bài hoặc URL]</code>",
-                                user_msg_id=user_msg_id)
-                            continue
-                        # Tìm bot đang trong team của chat_id này
-                        target_bot = None
-                        for b in active_bots:
-                            if b._telegram_chat_id == chat_id and b.voice_region_id:
-                                target_bot = b
-                                break
-                        if target_bot:
-                            asyncio.create_task(target_bot._play_from_query(query))
-                            await send(chat_id, f"🎵 <b>Đã thêm vào hàng chờ!</b>\n└ <i>{query[:60]}</i>", user_msg_id=user_msg_id)
-                        else:
-                            await send(chat_id,
-                                "❌ <b>Bot chưa vào team!</b>\n"
-                                "└ Dùng <code>/join [team_code]</code> trước.",
-                                user_msg_id=user_msg_id)
-
-                    # ── /skip ─────────────────────────────────────────────
-                    elif text.lower() == "/skip":
-                        target_bot = None
-                        for b in active_bots:
-                            if b._telegram_chat_id == chat_id and b.voice_region_id:
-                                target_bot = b
-                                break
-                        if target_bot:
-                            await target_bot._skip_current()
-                            nxt = target_bot._track_queue.qsize()
-                            msg = (
-                                f"⏭ <b>Đã bỏ bài!</b>\n└ 📋 Còn <b>{nxt}</b> bài trong hàng chờ."
-                                if nxt > 0 else
-                                "⏭ <b>Đã bỏ bài!</b>\n└ 📋 Hàng chờ trống."
-                            )
-                            await send(chat_id, msg, user_msg_id=user_msg_id)
-                        else:
-                            await send(chat_id, "❌ <b>Không có bot nào đang phát nhạc cho bạn.</b>", user_msg_id=user_msg_id)
-
-                    # ── /queue ────────────────────────────────────────────
-                    elif text.lower() in ("/queue", "/q"):
-                        target_bot = None
-                        for b in active_bots:
-                            if b._telegram_chat_id == chat_id and b.voice_region_id:
-                                target_bot = b
-                                break
-                        if target_bot:
-                            is_playing = target_bot._udp_task and not target_bot._udp_task.done()
-                            items = list(target_bot._track_queue._queue) if hasattr(target_bot._track_queue, '_queue') else []
-                            if not is_playing and not items:
-                                await send(chat_id, "📋 <b>Hàng chờ trống.</b>", user_msg_id=user_msg_id)
+                        # ── /play (direct, dành cho bot đang trong team của user) ──
+                        elif text.lower().startswith("/play"):
+                            query = text[5:].strip()
+                            if not query:
+                                await send(chat_id,
+                                    "❌ <b>Thiếu tên bài hoặc URL!</b>\n"
+                                    "└ <code>/play [tên bài hoặc URL]</code>",
+                                    user_msg_id=user_msg_id)
+                                continue
+                            # Tìm bot đang trong team của chat_id này
+                            target_bot = None
+                            for b in active_bots:
+                                if b._telegram_chat_id == chat_id and b.voice_region_id:
+                                    target_bot = b
+                                    break
+                            if target_bot:
+                                asyncio.create_task(target_bot._play_from_query(query))
+                                await send(chat_id, f"🎵 <b>Đã thêm vào hàng chờ!</b>\n└ <i>{query[:60]}</i>", user_msg_id=user_msg_id)
                             else:
-                                lines = ["📋 <b>Hàng chờ nhạc:</b>\n"]
-                                if is_playing and target_bot._track_title:
-                                    e_s = int(target_bot._track_current_frame * 0.02)
-                                    t_s = int(target_bot._track_total_frames * 0.02)
-                                    lines.append(f"▶️ <b>{target_bot._track_title[:45]}</b>\n    <code>{e_s//60}:{e_s%60:02d} / {t_s//60}:{t_s%60:02d}</code>")
-                                for i, (q, t) in enumerate(items, 1):
-                                    label = t or q
-                                    lines.append(f"<b>{i}.</b> {label[:50]}")
-                                await send(chat_id, "\n".join(lines), user_msg_id=user_msg_id)
-                        else:
-                            await send(chat_id, "❌ <b>Không có bot nào đang hoạt động cho bạn.</b>", user_msg_id=user_msg_id)
+                                await send(chat_id,
+                                    "❌ <b>Bot chưa vào team!</b>\n"
+                                    "└ Dùng <code>/join [team_code]</code> trước.",
+                                    user_msg_id=user_msg_id)
 
-                    # ── /clear ────────────────────────────────────────────
-                    elif text.lower() == "/clear":
-                        target_bot = None
-                        for b in active_bots:
-                            if b._telegram_chat_id == chat_id and b.voice_region_id:
-                                target_bot = b
-                                break
-                        if target_bot:
-                            await target_bot._clear_queue()
-                            await send(chat_id, "🗑 <b>Đã xóa hàng chờ và dừng phát nhạc.</b>", user_msg_id=user_msg_id)
-                        else:
-                            await send(chat_id, "❌ <b>Không có bot nào đang hoạt động cho bạn.</b>", user_msg_id=user_msg_id)
+                        # ── /skip ─────────────────────────────────────────────
+                        elif text.lower() == "/skip":
+                            target_bot = None
+                            for b in active_bots:
+                                if b._telegram_chat_id == chat_id and b.voice_region_id:
+                                    target_bot = b
+                                    break
+                            if target_bot:
+                                await target_bot._skip_current()
+                                nxt = target_bot._track_queue.qsize()
+                                msg = (
+                                    f"⏭ <b>Đã bỏ bài!</b>\n└ 📋 Còn <b>{nxt}</b> bài trong hàng chờ."
+                                    if nxt > 0 else
+                                    "⏭ <b>Đã bỏ bài!</b>\n└ 📋 Hàng chờ trống."
+                                )
+                                await send(chat_id, msg, user_msg_id=user_msg_id)
+                            else:
+                                await send(chat_id, "❌ <b>Không có bot nào đang phát nhạc cho bạn.</b>", user_msg_id=user_msg_id)
 
-                    # ── /leave ───────────────────────────────────────────
-                    elif text.lower() == "/leave":
-                        left = 0
-                        for bot in active_bots:
-                            if bot._telegram_chat_id == chat_id and bot.voice_region_id:
-                                asyncio.create_task(bot._leave_team())
-                                left += 1
-                        await send(chat_id,
-                            f"✅ <b>Đã ra lệnh rời team!</b>\n└ <b>{left}</b> bot đang rời…"
-                            if left else
-                            "ℹ️ <b>Không có bot nào của bạn trong team.</b>",
-                            user_msg_id=user_msg_id)
+                        # ── /queue ────────────────────────────────────────────
+                        elif text.lower() in ("/queue", "/q"):
+                            target_bot = None
+                            for b in active_bots:
+                                if b._telegram_chat_id == chat_id and b.voice_region_id:
+                                    target_bot = b
+                                    break
+                            if target_bot:
+                                is_playing = target_bot._udp_task and not target_bot._udp_task.done()
+                                items = list(target_bot._track_queue._queue) if hasattr(target_bot._track_queue, '_queue') else []
+                                if not is_playing and not items:
+                                    await send(chat_id, "📋 <b>Hàng chờ trống.</b>", user_msg_id=user_msg_id)
+                                else:
+                                    lines = ["📋 <b>Hàng chờ nhạc:</b>\n"]
+                                    if is_playing and target_bot._track_title:
+                                        e_s = int(target_bot._track_current_frame * 0.02)
+                                        t_s = int(target_bot._track_total_frames * 0.02)
+                                        lines.append(f"▶️ <b>{target_bot._track_title[:45]}</b>\n    <code>{e_s//60}:{e_s%60:02d} / {t_s//60}:{t_s%60:02d}</code>")
+                                    for i, (q, t) in enumerate(items, 1):
+                                        label = t or q
+                                        lines.append(f"<b>{i}.</b> {label[:50]}")
+                                    await send(chat_id, "\n".join(lines), user_msg_id=user_msg_id)
+                            else:
+                                await send(chat_id, "❌ <b>Không có bot nào đang hoạt động cho bạn.</b>", user_msg_id=user_msg_id)
 
-                    # ── /status ──────────────────────────────────────────
-                    elif text.lower() == "/status":
-                        lines = ["📊 <b>Trạng thái bot:</b>\n"]
-                        for i, bot in enumerate(active_bots, 1):
-                            in_team  = "✅ <b>Trong team</b>" if bot.voice_region_id else "💤 Rảnh"
-                            playing  = "🎵 Đang phát" if (bot._udp_task and not bot._udp_task.done()) else "⏸ Không phát"
-                            q_size   = bot._track_queue.qsize()
-                            pb_flag  = "  💃 <i>PB mode</i>" if bot._pb_mode else ""
-                            lines.append(f"<b>{i}.</b> <code>{bot.uid}</code>  {in_team}  {playing}{pb_flag}")
-                            if bot._track_title:
-                                e_s = int(bot._track_current_frame * 0.02)
-                                t_s = int(bot._track_total_frames * 0.02)
-                                lines.append(f"    └ 🎵 <i>{bot._track_title[:40]}</i>  <code>{e_s//60}:{e_s%60:02d}/{t_s//60}:{t_s%60:02d}</code>")
-                            if q_size > 0:
-                                lines.append(f"    └ 📋 Hàng chờ: <b>{q_size}</b> bài")
-                        await send(chat_id, "\n".join(lines), user_msg_id=user_msg_id)
+                        # ── /clear ────────────────────────────────────────────
+                        elif text.lower() == "/clear":
+                            target_bot = None
+                            for b in active_bots:
+                                if b._telegram_chat_id == chat_id and b.voice_region_id:
+                                    target_bot = b
+                                    break
+                            if target_bot:
+                                await target_bot._clear_queue()
+                                await send(chat_id, "🗑 <b>Đã xóa hàng chờ và dừng phát nhạc.</b>", user_msg_id=user_msg_id)
+                            else:
+                                await send(chat_id, "❌ <b>Không có bot nào đang hoạt động cho bạn.</b>", user_msg_id=user_msg_id)
+
+                        # ── /leave ───────────────────────────────────────────
+                        elif text.lower() == "/leave":
+                            left = 0
+                            for bot in active_bots:
+                                if bot._telegram_chat_id == chat_id and bot.voice_region_id:
+                                    asyncio.create_task(bot._leave_team())
+                                    left += 1
+                            await send(chat_id,
+                                f"✅ <b>Đã ra lệnh rời team!</b>\n└ <b>{left}</b> bot đang rời…"
+                                if left else
+                                "ℹ️ <b>Không có bot nào của bạn trong team.</b>",
+                                user_msg_id=user_msg_id)
+
+                        # ── /status ──────────────────────────────────────────
+                        elif text.lower() == "/status":
+                            lines = ["📊 <b>Trạng thái bot:</b>\n"]
+                            for i, bot in enumerate(active_bots, 1):
+                                in_team  = "✅ <b>Trong team</b>" if bot.voice_region_id else "💤 Rảnh"
+                                playing  = "🎵 Đang phát" if (bot._udp_task and not bot._udp_task.done()) else "⏸ Không phát"
+                                q_size   = bot._track_queue.qsize()
+                                pb_flag  = "  💃 <i>PB mode</i>" if bot._pb_mode else ""
+                                lines.append(f"<b>{i}.</b> <code>{bot.uid}</code>  {in_team}  {playing}{pb_flag}")
+                                if bot._track_title:
+                                    e_s = int(bot._track_current_frame * 0.02)
+                                    t_s = int(bot._track_total_frames * 0.02)
+                                    lines.append(f"    └ 🎵 <i>{bot._track_title[:40]}</i>  <code>{e_s//60}:{e_s%60:02d}/{t_s//60}:{t_s%60:02d}</code>")
+                                if q_size > 0:
+                                    lines.append(f"    └ 📋 Hàng chờ: <b>{q_size}</b> bài")
+                            await send(chat_id, "\n".join(lines), user_msg_id=user_msg_id)
 
                 except Exception as e:
                     import traceback as _tb

@@ -1,0 +1,57 @@
+{
+  "8400545507": {
+    "unique_device_id": "Google|ad30ab6c-98ae-4b1e-b848-445c2f99b11c",
+    "model": "2201122G",
+    "gpu_renderer": "Adreno (TM) 730",
+    "system_software": "Android OS 13 / API-33 (TKQ1.220905.001/V14.0.6.0.TKMCNXM)",
+    "screen_width": 1440,
+    "screen_height": 2400,
+    "screen_dpi": "340",
+    "memory": 3327,
+    "processor": "ARM64 FP ASIMD AES | 2978 | 12"
+  },
+  "8414755364": {
+    "unique_device_id": "Google|aa5a8728-9f3a-4e40-9fa4-1410dc151923",
+    "model": "24094RAD4G",
+    "gpu_renderer": "Adreno (TM) 720",
+    "system_software": "Android OS 14 / API-34 (UKQ1.230924.001/OS1.0.6.6.UNACNXM)",
+    "screen_width": 1080,
+    "screen_height": 2400,
+    "screen_dpi": "364",
+    "memory": 3229,
+    "processor": "ARM64 FP ASIMD AES | 2940 | 6"
+  },
+  "8415395726": {
+    "unique_device_id": "Google|adf6df5b-6361-43f1-8211-b0ddff33ee24",
+    "model": "RMX3700",
+    "gpu_renderer": "Mali-G710 MC10",
+    "system_software": "Android OS 14 / API-34 (UKQ1.230924.001/RMX3700.14.C.01)",
+    "screen_width": 1080,
+    "screen_height": 1080,
+    "screen_dpi": "352",
+    "memory": 5516,
+    "processor": "ARM64 FP ASIMD AES | 2681 | 10"
+  },
+  "8418606844": {
+    "unique_device_id": "Google|156ce500-0c2f-4d8d-955e-d06fb4173160",
+    "model": "SM-G998B",
+    "gpu_renderer": "Adreno (TM) 660",
+    "system_software": "Android OS 12 / API-31 (SP1A.210812.016/G998BXXU5BULA)",
+    "screen_width": 1080,
+    "screen_height": 1080,
+    "screen_dpi": "383",
+    "memory": 3569,
+    "processor": "ARM64 FP ASIMD AES | 2255 | 11"
+  },
+  "8418606843": {
+    "unique_device_id": "Google|76525ffe-0840-4995-baf1-bf5717c0239d",
+    "model": "SM-G998B",
+    "gpu_renderer": "Adreno (TM) 660",
+    "system_software": "Android OS 12 / API-31 (SP1A.210812.016/G998BXXU5BULA)",
+    "screen_width": 1440,
+    "screen_height": 3200,
+    "screen_dpi": "354",
+    "memory": 6748,
+    "processor": "ARM64 FP ASIMD AES | 2511 | 11"
+  }
+}

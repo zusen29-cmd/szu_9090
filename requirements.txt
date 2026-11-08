@@ -1,0 +1,5 @@
+aiohttp
+pycryptodome
+protobuf
+yt-dlp
+aiofiles

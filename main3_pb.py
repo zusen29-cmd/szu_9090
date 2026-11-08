@@ -2262,38 +2262,63 @@ async def run_telegram_bot(token: str, active_bots: list):
         except Exception as _e:
             HELLXlog("TELEGRAM", f"skip_pending failed (non-critical): {_e}")
 
-    async with aiohttp.ClientSession() as session:
-        while True:
-            try:
-                async with session.get(
-                    f"{url}?offset={offset}&timeout=30", timeout=aiohttp.ClientTimeout(total=35)
-                ) as resp:
-                    if resp.status != 200:
-                        await asyncio.sleep(2)
-                        continue
-                    data = await resp.json()
+    while True:
+        try:
+          async with aiohttp.ClientSession() as session:
+            while True:
+                try:
+                    async with session.get(
+                        f"{url}?offset={offset}&timeout=30", timeout=aiohttp.ClientTimeout(total=35)
+                    ) as resp:
+                        if resp.status != 200:
+                            HELLXlog("TELEGRAM", f"Poll HTTP {resp.status} — retry in 3s")
+                            await asyncio.sleep(3)
+                            continue
+                        try:
+                            data = await resp.json(content_type=None)
+                        except Exception as je:
+                            HELLXlog("TELEGRAM", f"JSON parse error: {je} — skip")
+                            await asyncio.sleep(2)
+                            continue
 
-                for result in data.get("result", []):
-                    offset      = result["update_id"] + 1
-                    msg         = result.get("message", {})
-                    text        = msg.get("text", "").strip()
-                    chat_id     = msg.get("chat", {}).get("id")
-                    user_msg_id = msg.get("message_id")
-                    if not text or not chat_id:
-                        continue
+                    for result in data.get("result", []):
+                        offset      = result["update_id"] + 1
+                        msg         = result.get("message", {})
+                        text        = msg.get("text", "").strip()
+                        chat_id     = msg.get("chat", {}).get("id")
+                        user_msg_id = msg.get("message_id")
+                        if not text or not chat_id:
+                            continue
+                        HELLXlog("TELEGRAM", f"CMD: {text!r} from chat_id={chat_id}")
 
                     # ── /start ──────────────────────────────────────────
                     if text == "/start":
                         await send(chat_id,
-                            "🎵 Free Fire × Voice Bot\n\n"
-                            "📌 Phát nhạc:\n"
-                            "1️⃣ /search [tên bài] — tìm NCT\n"
-                            "   /search yt [tên] — YouTube\n"
-                            "2️⃣ /join [team_code] [số] — vào team + phát bài\n\n"
-                            "💃 Nhảy emote (không cần nhạc):\n"
-                            "/pb [team_code] — bot vào team và nhảy emote liên tục\n\n"
-                            "🔧 Khác:\n"
-                            "/play [bài] | /skip | /queue | /clear | /leave | /status",
+                            "🤖 TCP BOT (FF) — Danh sách lệnh\n\n"
+                            "━━━━━━━━━━━━━━━━━━━━━\n"
+                            "🎵 PHÁT NHẠC\n"
+                            "/search [tên bài] — tìm bài (NCT)\n"
+                            "/search yt [tên] — tìm YouTube\n"
+                            "/join [team_code] — vào team\n"
+                            "/join [team_code] [số] — vào team + phát bài từ /search\n"
+                            "/play [tên/URL] — thêm vào hàng chờ\n"
+                            "/skip — bỏ bài đang phát\n"
+                            "/queue — xem hàng chờ\n"
+                            "/clear — xóa toàn bộ hàng chờ\n\n"
+                            "━━━━━━━━━━━━━━━━━━━━━\n"
+                            "💃 NHẢY EMOTE (không cần nhạc)\n"
+                            "/pb [team_code] — bot vào team nhảy emote liên tục\n\n"
+                            "━━━━━━━━━━━━━━━━━━━━━\n"
+                            "🔧 QUẢN LÝ\n"
+                            "/leave — bot rời team\n"
+                            "/status — xem trạng thái tất cả bot\n\n"
+                            "━━━━━━━━━━━━━━━━━━━━━\n"
+                            "🎮 LỆNH TRONG GAME (chat tổ đội)\n"
+                            "!play [tên/URL] — phát nhạc\n"
+                            "!skip — bỏ bài  |  !queue — xem hàng\n"
+                            "!clear / !stop — xóa queue\n"
+                            "!volume [0-200] — âm lượng\n"
+                            "!leave — bot rời team",
                             user_msg_id=user_msg_id
                         )
 
@@ -2645,9 +2670,17 @@ async def run_telegram_bot(token: str, active_bots: list):
                                 lines.append(f"   📋 Hàng chờ: {q_size} bài")
                         await send(chat_id, "\n".join(lines), user_msg_id=user_msg_id)
 
-            except Exception as e:
-                HELLXlog("TELEGRAM", f"Error: {e}")
-                await asyncio.sleep(5)
+                except Exception as e:
+                    import traceback as _tb
+                    HELLXlog("TELEGRAM", f"Inner loop error: {type(e).__name__}: {e}")
+                    HELLXlog("TELEGRAM", _tb.format_exc()[-400:])
+                    await asyncio.sleep(5)
+
+        except Exception as e:
+            import traceback as _tb
+            HELLXlog("TELEGRAM", f"Session error (sẽ tái tạo session): {type(e).__name__}: {e}")
+            HELLXlog("TELEGRAM", _tb.format_exc()[-300:])
+            await asyncio.sleep(5)
 
 
 # ---------------------------------------------------------------------------

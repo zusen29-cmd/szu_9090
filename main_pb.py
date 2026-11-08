@@ -533,12 +533,40 @@ class HELLXBot:
 
         # Internal
         self._current_version     = "1.132.11"  # OB55
+        self._online              = False   # True khi TCP online server đã connect thành công
 
     # ------------------------------------------------------------------
     # Entry point
     # ------------------------------------------------------------------
 
     async def run(self):
+        import time as _time
+        _retry_delay = 15  # giây chờ giữa các lần re-login
+        while True:
+            await self._run_once()
+            HELLXlog("BOT", f"uid={self.uid} — offline, re-login sau {_retry_delay}s...")
+            # Reset trạng thái online trước khi thử lại
+            self.writer        = None
+            self.token         = None
+            self.voice_region_id = None
+            self.chat_region_id  = None
+            self.team_owner_uid  = None
+            self._joining        = False
+            self._join_success   = False
+            if self._chat_writer:
+                try:
+                    self._chat_writer.close()
+                except Exception:
+                    pass
+                self._chat_writer = None
+                self._chat_reader = None
+            if self._pb_emote_task and not self._pb_emote_task.done():
+                self._pb_emote_task.cancel()
+                self._pb_emote_task = None
+            self._pb_mode = False
+            await asyncio.sleep(_retry_delay)
+
+    async def _run_once(self):
         import time as _time
         HELLXlog("BOT", f"Starting uid={self.uid}")
         headers = HELLXdefault_headers()
@@ -757,9 +785,11 @@ class HELLXBot:
             return
         HELLXlog("LOGIN[6/6]", f"OK — online TCP connected ✅")
 
-        self.writer = writer
+        self.writer   = writer
+        self._online  = True
         asyncio.create_task(HELLXping_loop(writer, HELLXbuild_ping_packet, self.key, self.iv))
         await HELLXread_loop(reader, self._handle_tcp_data, self.key, self.iv)
+        self._online = False
 
     # ------------------------------------------------------------------
     # Incoming packet handler (online server)
@@ -1272,16 +1302,30 @@ class HELLXBot:
             # Delay nhỏ để voice connect ổn định + welcome msg kịp gửi trước
             await asyncio.sleep(2.0)
             HELLXlog("EMOTE", f"pb_emote_loop: bắt đầu nhảy emote, {len(emotes)} emotes")
-            while self._pb_mode and self.voice_region_id:
-                await self._trigger_emote(emotes[idx % len(emotes)])
+            while self._pb_mode and self.voice_region_id and idx < len(emotes):
+                await self._trigger_emote(emotes[idx])
                 idx += 1
-                HELLXlog("EMOTE", f"pb_emote_loop: emote #{idx} gửi")
+                HELLXlog("EMOTE", f"pb_emote_loop: emote {idx}/{len(emotes)} gửi")
                 # 7s giữa các emote — chia nhỏ để cancel nhanh
                 for _ in range(14):
                     await asyncio.sleep(0.5)
                     if not self._pb_mode or not self.voice_region_id:
                         HELLXlog("EMOTE", "pb_emote_loop: dừng do pb_mode=False hoặc rời team")
                         return
+            # Nhảy hết toàn bộ emote → tự rời team
+            if self._pb_mode and self.voice_region_id:
+                HELLXlog("EMOTE", "pb_emote_loop: đã nhảy hết emote — tự rời team")
+                # Thông báo Telegram trước khi rời
+                if self._telegram_notify_cb and self._telegram_chat_id:
+                    try:
+                        await self._telegram_notify_cb(
+                            self._telegram_chat_id,
+                            "✅ <b>Bot đã nhảy xong tất cả emote!</b>\n"
+                            "└ Tự động rời team."
+                        )
+                    except Exception:
+                        pass
+                await self._leave_team()
             HELLXlog("EMOTE", "pb_emote_loop END")
         except asyncio.CancelledError:
             HELLXlog("EMOTE", "pb_emote_loop CANCELLED")
@@ -2394,6 +2438,9 @@ async def run_telegram_bot(token: str, active_bots: list):
 
                         # ── /join ────────────────────────────────────────────
                         elif text.lower().startswith("/join"):
+                            if not any(b._online for b in active_bots):
+                                await send(chat_id, "❌ <b>Không có bot nào Online!</b>\n└ Hệ thống đang khởi động lại, thử lại sau ít phút.", user_msg_id=user_msg_id)
+                                continue
                             parts = text.split()
                             # /join CODE           → join only (no play)
                             # /join CODE 2         → join + play bài số 2 từ search_cache
@@ -2524,6 +2571,9 @@ async def run_telegram_bot(token: str, active_bots: list):
 
                         # ── /pb TeamCode (join team + nhảy emote, không cần nhạc) ──
                         elif text.lower().startswith("/pb"):
+                            if not any(b._online for b in active_bots):
+                                await send(chat_id, "❌ <b>Không có bot nào Online!</b>\n└ Hệ thống đang khởi động lại, thử lại sau ít phút.", user_msg_id=user_msg_id)
+                                continue
                             parts = text.split()
                             if len(parts) < 2:
                                 await send(chat_id,

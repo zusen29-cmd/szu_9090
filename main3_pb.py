@@ -1256,21 +1256,35 @@ class HELLXBot:
         Không phụ thuộc vào _udp_task (không cần phát nhạc).
         Chạy liên tục cho đến khi: rời team | _pb_mode = False | task bị cancel."""
         try:
-            # Đăng ký emote set với server trước khi nhảy (giống _choose_emote_http dùng bởi voice)
+            HELLXlog("EMOTE", f"pb_emote_loop START uid={self.uid} region={self.voice_region_id} pb_mode={self._pb_mode}")
+            # Đăng ký emote set với server trước khi nhảy
             await self._choose_emote_http()
             emotes = list(self._emote_ids) if self._emote_ids else [909054004]
             idx = 0
+            # Chờ voice_region_id chắc chắn có (tối đa 5s)
+            for _ in range(10):
+                if self.voice_region_id:
+                    break
+                await asyncio.sleep(0.5)
+            if not self.voice_region_id:
+                HELLXlog("EMOTE", "pb_emote_loop: voice_region_id vẫn None sau 5s — abort")
+                return
             # Delay nhỏ để voice connect ổn định + welcome msg kịp gửi trước
-            await asyncio.sleep(3.0)
+            await asyncio.sleep(2.0)
+            HELLXlog("EMOTE", f"pb_emote_loop: bắt đầu nhảy emote, {len(emotes)} emotes")
             while self._pb_mode and self.voice_region_id:
                 await self._trigger_emote(emotes[idx % len(emotes)])
                 idx += 1
+                HELLXlog("EMOTE", f"pb_emote_loop: emote #{idx} gửi")
                 # 7s giữa các emote — chia nhỏ để cancel nhanh
                 for _ in range(14):
                     await asyncio.sleep(0.5)
                     if not self._pb_mode or not self.voice_region_id:
+                        HELLXlog("EMOTE", "pb_emote_loop: dừng do pb_mode=False hoặc rời team")
                         return
+            HELLXlog("EMOTE", "pb_emote_loop END")
         except asyncio.CancelledError:
+            HELLXlog("EMOTE", "pb_emote_loop CANCELLED")
             pass
         except Exception as e:
             HELLXlog("EMOTE", f"pb_emote_loop error: {e}")
@@ -1736,8 +1750,13 @@ class HELLXBot:
 
     async def _emote_loop(self):
         """Cycle qua tất cả emotes trong suốt bài hát (7s/emote), lặp lại từ đầu khi hết list.
-        An toàn với concurrent: thoát ngay khi bị cancel hoặc udp_task đã done."""
+        An toàn với concurrent: thoát ngay khi bị cancel hoặc udp_task đã done.
+        Không chạy khi đang ở pb_mode (pb mode có loop riêng _pb_emote_loop)."""
         try:
+            # Guard: nếu đang pb_mode thì không chạy emote loop này
+            if self._pb_mode:
+                HELLXlog("EMOTE", "_emote_loop skipped — pb_mode active")
+                return
             emotes = list(self._emote_ids) if self._emote_ids else [909054004]
             idx = 0
             # Delay nhỏ để tránh emote ngay lúc bài vừa bắt đầu (server chưa nhận session)
@@ -1745,6 +1764,8 @@ class HELLXBot:
             while True:
                 # Dừng khi bài hát kết thúc hoặc không còn trong team
                 if not self.voice_region_id:
+                    break
+                if self._pb_mode:   # pb mode chiếm quyền emote
                     break
                 if self._udp_task is None or self._udp_task.done():
                     break
@@ -2460,8 +2481,14 @@ async def run_telegram_bot(token: str, active_bots: list):
 
                                         async def _check_pb(b=bot, c=chat_id, tc=pb_code, umid=user_msg_id):
                                             b._join_success = False
-                                            await asyncio.sleep(3)
+                                            # Chờ tối đa 6s để nhận join confirm từ server
+                                            # (trước là 3s — dễ miss nếu server lag)
+                                            for _i in range(12):
+                                                await asyncio.sleep(0.5)
+                                                if b._join_success:
+                                                    break
                                             b._joining = False
+                                            HELLXlog("PB", f"_check_pb: uid={b.uid} join_success={b._join_success} voice_region={b.voice_region_id}")
                                             async with aiohttp.ClientSession() as s:
                                                 if b._join_success:
                                                     b._pb_mode = True

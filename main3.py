@@ -950,7 +950,7 @@ class HELLXBot:
         self._chat_buffer = buffer[pos:]
 
     # ------------------------------------------------------------------
-    # In-game chat commands  (!play / !stop / !resume / !volume)
+    # In-game chat commands  (!play / !stop / !resume / !volume / !search / !help)
     # ------------------------------------------------------------------
 
     async def _handle_command(self, message: str, sender_uid: str):
@@ -962,12 +962,66 @@ class HELLXBot:
             cmd  = parts[0].lower() if parts else ""
             args = parts[1:] if len(parts) > 1 else []
 
-            if cmd == "!play":
+            if cmd == "!help":
+                await self._send_chat(
+                    "[27EBF5]╔══ MUSIC BOT ══╗\n"
+                    "[27EBF5]!search [tên bài]\n"
+                    "[A627F5]  → Tìm nhạc (NCT, 10 bài)\n"
+                    "[27EBF5]!play [số] hoặc [tên/URL]\n"
+                    "[A627F5]  → Phát bài (số từ !search)\n"
+                    "[27EBF5]!skip / !queue / !clear\n"
+                    "[27EBF5]!stop / !resume\n"
+                    "[27EBF5]!volume [0-200]\n"
+                    "[27EBF5]!leave — bot rời team\n"
+                    "[27EBF5]╚══════════════╝"
+                )
+
+            elif cmd == "!search":
                 query = " ".join(args)
                 if not query:
-                    await self._send_chat("[F52727]Usage: !play [url or song name]")
+                    await self._send_chat("[F52727]Dùng: !search [tên bài]")
                     return
-                await self._play_from_query(query)
+                await self._send_chat(f"[27EBF5]🔍 Đang tìm: {query[:40]}...")
+                try:
+                    results = await _nct_search(query, limit=10)
+                    if not results:
+                        await self._send_chat(f"[F52727]Không tìm thấy: {query[:30]}")
+                        return
+                    # Lưu cache theo uid của bot (dùng cho !play [số])
+                    self._search_cache = results
+                    lines = ["[27EBF5]🎵 Kết quả tìm kiếm:"]
+                    for i, r in enumerate(results, 1):
+                        artist = r.get("artist", "")
+                        dur    = r.get("duration", "?")
+                        title  = r["title"][:35]
+                        lines.append(f"[A627F5]{i}. {title} [{dur}]")
+                        if artist:
+                            lines.append(f"[FFFFFF]   {artist[:30]}")
+                    lines.append("[27EBF5]▶ !play [số] để phát")
+                    await self._send_chat("\n".join(lines))
+                except Exception as e:
+                    await self._send_chat(f"[F52727]Lỗi tìm kiếm: {e}")
+
+            elif cmd == "!play":
+                query = " ".join(args)
+                if not query:
+                    await self._send_chat("[F52727]Dùng: !play [số] hoặc [tên/URL]")
+                    return
+                # Nếu là số → lấy từ search cache
+                if query.isdigit():
+                    cache = getattr(self, "_search_cache", [])
+                    idx = int(query) - 1
+                    if not cache:
+                        await self._send_chat("[F52727]Chưa có kết quả tìm kiếm. Dùng !search trước.")
+                        return
+                    if idx < 0 or idx >= len(cache):
+                        await self._send_chat(f"[F52727]Số không hợp lệ. Nhập 1-{len(cache)}.")
+                        return
+                    r = cache[idx]
+                    await self._send_chat(f"[27EBF5]➕ Thêm: {r['title'][:45]}")
+                    await self._play_from_query(r["url"], title_hint=r["title"])
+                else:
+                    await self._play_from_query(query)
 
             elif cmd in ("!stop", "!pause"):
                 if self._udp_task and not self._udp_task.done():
@@ -1782,7 +1836,7 @@ class HELLXBot:
                         "ffmpeg", "-loglevel", "quiet", "-y",
                         "-i", raw_file,
                         "-ar", "16000", "-ac", "1",
-                        "-af", "volume=5.0,dynaudnorm=f=200:g=5",
+                        "-af", "volume=2.5,dynaudnorm=f=200:g=5",
                         "-c:a", "libopus",
                         "-b:a", f"{self.opus_bitrate // 1000}k",
                         "-vbr", "off",

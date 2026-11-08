@@ -1242,11 +1242,8 @@ class HELLXBot:
         # ── Tin nhắn chào nhiều màu ──────────────────────────────────────
         # Mỗi [RRGGBB] đổi màu cho text phía sau cho đến tag tiếp theo
         welcome = (
-            "[FF8C00]✦ [FFFF00]✦ [F52727]✦ [27EBF5]✦ [A627F5]✦ [27EBF5]✦ [F52727]✦ [FFFF00]✦ [FF8C00]✦\n"
             "[FFFF00]Welcome [F52727]Bot [27EBF5]Emote [FF8C00]By [FFFF00]Senzu[F52727].!\n"
-            "[A627F5]Telegram: [27EBF5]@S_ZU_01\n"
-            "[F52727]TikTok: [FF8C00]@jocker_90a\n"
-            "[FF8C00]✦ [FFFF00]✦ [F52727]✦ [27EBF5]✦ [A627F5]✦ [27EBF5]✦ [F52727]✦ [FFFF00]✦ [FF8C00]✦"
+            "[A627F5]TG: [27EBF5]@S_ZU_01"
         )
         await self._send_chat(welcome)
         HELLXlog("EMOTE", "PB: welcome msg đã gửi")

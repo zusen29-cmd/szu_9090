@@ -2391,11 +2391,11 @@ async def run_telegram_bot(token: str, active_bots: list):
                                     await send(chat_id, "❌ Tham số thứ hai phải là số thứ tự hoặc URL.", user_msg_id=user_msg_id)
                                     continue
 
-                        # Tìm bot rảnh
+                        # Tìm bot rảnh — check cả _joining tránh spam /join
                         count = 0
                         for bot in active_bots:
                             if bot.writer and not bot.writer.transport.is_closing():
-                                if not bot.voice_region_id:
+                                if not bot.voice_region_id and not bot._joining:
                                     try:
                                         join_pkt = HELLXbuild_join_sq(int(bot.uid), code, bot.key, bot.iv)
                                         bot.writer.write(join_pkt)
@@ -2406,7 +2406,11 @@ async def run_telegram_bot(token: str, active_bots: list):
 
                                         async def _check(b=bot, c=chat_id, tc=code, url=play_url, title=play_title, umid=user_msg_id):
                                             b._join_success = False
-                                            await asyncio.sleep(3)
+                                            # Poll 6s thay vì sleep cứng 3s
+                                            for _i in range(12):
+                                                await asyncio.sleep(0.5)
+                                                if b._join_success:
+                                                    break
                                             b._joining = False
                                             async with aiohttp.ClientSession() as s:
                                                 if b._join_success:
@@ -2462,11 +2466,12 @@ async def run_telegram_bot(token: str, active_bots: list):
 
                         pb_code = parts[1]
 
-                        # Tìm bot rảnh
+                        # Tìm bot rảnh — phải check cả _joining để tránh gửi 2 lần
+                        # khi người dùng spam /pb trước khi lần 1 hoàn thành
                         pb_count = 0
                         for bot in active_bots:
                             if bot.writer and not bot.writer.transport.is_closing():
-                                if not bot.voice_region_id:
+                                if not bot.voice_region_id and not bot._joining:
                                     try:
                                         join_pkt = HELLXbuild_join_sq(int(bot.uid), pb_code, bot.key, bot.iv)
                                         bot.writer.write(join_pkt)
@@ -2528,7 +2533,15 @@ async def run_telegram_bot(token: str, active_bots: list):
                         if pb_count > 0:
                             await send(chat_id, f"⏳ Đang vào team {pb_code} (pb mode)...", user_msg_id=user_msg_id)
                         else:
-                            await send(chat_id, "❌ Không có bot rảnh.", user_msg_id=user_msg_id)
+                            # Phân biệt: bot đang joining vs bot đang trong team
+                            joining_bots = [b for b in active_bots if b._joining]
+                            busy_bots    = [b for b in active_bots if b.voice_region_id]
+                            if joining_bots:
+                                await send(chat_id, "⏳ Bot đang xử lý lệnh trước, chờ vài giây rồi thử lại.", user_msg_id=user_msg_id)
+                            elif busy_bots:
+                                await send(chat_id, "❌ Tất cả bot đang trong team. Dùng /leave trước.", user_msg_id=user_msg_id)
+                            else:
+                                await send(chat_id, "❌ Không có bot rảnh.", user_msg_id=user_msg_id)
 
                     # ── /play (direct, dành cho bot đang trong team của user) ──
                     elif text.lower().startswith("/play"):

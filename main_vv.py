@@ -1746,12 +1746,13 @@ class HELLXBot:
 
     async def _trigger_emote(self, emote_id: int = None):
         """Gửi 1 emote cho tất cả member trong squad + chính bot.
-        FIX: luôn include team_owner_uid — tránh owner mất emote sau khi người khác leave."""
+        FIX: luôn include team_owner_uid — tránh owner mất emote sau khi người khác leave.
+        FIX2: writer.drain() có timeout 0.1s để không block event loop lâu khi
+              audio loop đang chạy đồng thời (_send_ev pattern cần event loop free)."""
         try:
             if not self.writer or self.writer.transport.is_closing():
                 return
             bot_uid = self.account_uid or int(self.uid)
-            # Gom đủ: squad list hiện tại + bot + owner (tránh thiếu owner khi member leave)
             must_have = [bot_uid]
             if self.team_owner_uid:
                 must_have.append(int(self.team_owner_uid))
@@ -1761,7 +1762,12 @@ class HELLXBot:
             eid = emote_id or (self._emote_ids[0] if self._emote_ids else 909054004)
             pkt = self._build_emote_pkt(eid, uids)
             self.writer.write(pkt)
-            await self.writer.drain()
+            # Timeout 0.1s: tránh drain block event loop khi TCP server chậm
+            # Audio loop dùng asyncio.Event cần event loop free để nhận signal
+            try:
+                await asyncio.wait_for(self.writer.drain(), timeout=0.1)
+            except asyncio.TimeoutError:
+                pass   # buffer sẽ flush khi loop rảnh, không cần chờ
             HELLXlog("EMOTE", f"emote={eid} → uids={uids}")
         except Exception as e:
             HELLXlog("EMOTE", f"Error: {e}")
@@ -2378,27 +2384,78 @@ class HELLXBot:
                     # Trễ tích lũy quá nhiều → reset, tránh burst gửi nhiều frame liên tiếp
                     next_t = _time.perf_counter() + FRAME_DURATION
 
+        # _send_ev: timing_thread signal mỗi khi có packet sẵn trong send_q
+        # → async loop dùng await thay run_in_executor, không tạo thread pool overhead
+        _send_ev = asyncio.Event()
+
+        def _timing_thread_signal():
+            """Wrapper: sau khi put vào send_q, signal event loop từ OS thread."""
+            loop.call_soon_threadsafe(_send_ev.set)
+
+        # Patch timing_thread để gọi signal sau mỗi put
+        _orig_timing = _timing_thread
+
+        def _timing_thread():
+            import select as _sel
+            next_t = _time.perf_counter()
+            while not _stop_ev.is_set() and not self._audio_stop:
+                try:
+                    opus = audio_q.get(timeout=0.1)
+                except _q.Empty:
+                    next_t = _time.perf_counter()
+                    continue
+                if opus is None:
+                    try: send_q.put(None, timeout=1.0)
+                    except Exception: pass
+                    loop.call_soon_threadsafe(_send_ev.set)
+                    break
+                pkt = _build_pkt(opus)
+                try:
+                    send_q.put(pkt, timeout=0.5)
+                    loop.call_soon_threadsafe(_send_ev.set)   # ← signal event loop
+                except _q.Full:
+                    pass
+                next_t += FRAME_DURATION
+                sl = next_t - _time.perf_counter()
+                if sl > 0.002:
+                    _sel.select([], [], [], sl - 0.001)
+                    while _time.perf_counter() < next_t:
+                        pass
+                elif sl <= -0.050:
+                    next_t = _time.perf_counter() + FRAME_DURATION
+
         timing_th = _threading.Thread(target=_timing_thread, daemon=True)
         timing_th.start()
 
         try:
             while not self._audio_stop:
-                # run_in_executor để không block event loop khi queue trống
+                # Dùng Event thay run_in_executor:
+                # - không tạo thread pool task mỗi 20ms
+                # - không bị tranh chấp với emote writer.drain()
+                # - event loop free để xử lý task khác giữa các frame
                 try:
-                    pkt = await loop.run_in_executor(
-                        None, lambda: send_q.get(timeout=0.5)
-                    )
-                except _q.Empty:
+                    await asyncio.wait_for(_send_ev.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
                     continue
-                if pkt is None:
-                    HELLXlog("VOICE", f"UDP: hết nhạc ({sent} frames)")
+                _send_ev.clear()
+                # Drain toàn bộ send_q trong 1 lần wake (burst drain)
+                while True:
+                    try:
+                        pkt = send_q.get_nowait()
+                    except _q.Empty:
+                        break
+                    if pkt is None:
+                        HELLXlog("VOICE", f"UDP: hết nhạc ({sent} frames)")
+                        self._audio_stop = True
+                        break
+                    try:
+                        udp.sendto(pkt, (ip, udp_port))
+                    except OSError as e:
+                        HELLXlog("VOICE", f"UDP: sock err: {e}")
+                    sent += 1
+                    self._track_current_frame = sent
+                if self._audio_stop:
                     break
-                try:
-                    udp.sendto(pkt, (ip, udp_port))
-                except OSError as e:
-                    HELLXlog("VOICE", f"UDP: sock err: {e}")
-                sent += 1
-                self._track_current_frame = sent
 
         except asyncio.CancelledError:
             self._stopped_frame = sent

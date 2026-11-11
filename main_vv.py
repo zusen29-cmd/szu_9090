@@ -490,6 +490,7 @@ class HELLXBot:
 
         # Telegram
         self._telegram_chat_id    = None
+        self._session_id          = None   # UUID mỗi lần join — isolation A/B
         self._joining             = False
         self._join_success        = False
 
@@ -1206,6 +1207,9 @@ class HELLXBot:
         self._current_url   = None
         self._track_title   = ""
         self._stopped_frame = 0
+        # Reset ownership — bot không còn thuộc về ai
+        self._telegram_chat_id = None
+        self._session_id       = None
         HELLXlog("TEAM", "Left. Waiting for next invite...")
 
     # ------------------------------------------------------------------
@@ -2680,7 +2684,20 @@ async def run_telegram_bot(token: str, active_bots: list):
                                 for i, r in enumerate(results, 1):
                                     artist = r.get("artist") or r.get("channel") or "Unknown"
                                     lines.append(f"<b>{i}.</b> {r['title']}\n    <i>🎤 {artist}</i>  <code>⏱ {r['duration']}</code>")
-                                lines.append(f"\n▶️ <b>Phát nhạc:</b> <code>/join [team_code] [số thứ tự]</code>")
+
+                                # Kiểm tra user có bot đang active không
+                                # → nếu có, thêm shortcut /play [số]; nếu không, hướng dẫn /join
+                                user_active_bot = next(
+                                    (b for b in active_bots
+                                     if b._telegram_chat_id == chat_id
+                                     and b.voice_region_id
+                                     and b._session_id is not None),
+                                    None
+                                )
+                                if user_active_bot:
+                                    lines.append(f"\n▶️ <b>Bot của bạn đang trong team!</b>\n└ Phát ngay: <code>/play [số thứ tự]</code>  •  VD: <code>/play 1</code>")
+                                else:
+                                    lines.append(f"\n▶️ <b>Phát nhạc:</b> <code>/join [team_code] [số thứ tự]</code>\n└ VD: <code>/join ABCD123 1</code>")
                                 await send(chat_id, "\n".join(lines), user_msg_id=user_msg_id, edit_msg_id=wait_mid)
 
                             except Exception as e:
@@ -2734,20 +2751,29 @@ async def run_telegram_bot(token: str, active_bots: list):
                                         continue
 
                             # Tìm bot rảnh — check cả _joining tránh spam /join
+                            # Bot "rảnh" = không trong team, không đang join, và _telegram_chat_id=None
+                            # (đảm bảo bot không bị chia sẻ giữa 2 người dùng)
                             wait_mid = await send_waiting(chat_id)
                             count = 0
+                            import uuid as _uuid_tg
                             for bot in active_bots:
                                 if bot.writer and not bot.writer.transport.is_closing():
-                                    if not bot.voice_region_id and not bot._joining:
+                                    if (not bot.voice_region_id
+                                            and not bot._joining
+                                            and bot._telegram_chat_id is None):
                                         try:
+                                            # Gán session trước khi gửi packet
+                                            # → tránh race condition nếu server confirm cực nhanh
+                                            _sid = str(_uuid_tg.uuid4())
+                                            bot._telegram_chat_id = chat_id
+                                            bot._session_id       = _sid
+                                            bot._joining          = True
                                             join_pkt = HELLXbuild_join_sq(int(bot.uid), code, bot.key, bot.iv)
                                             bot.writer.write(join_pkt)
                                             await bot.writer.drain()
                                             count += 1
-                                            bot._telegram_chat_id = chat_id
-                                            bot._joining          = True
 
-                                            async def _check(b=bot, c=chat_id, tc=code, url=play_url, title=play_title, umid=user_msg_id, wmid=wait_mid):
+                                            async def _check(b=bot, c=chat_id, tc=code, url=play_url, title=play_title, umid=user_msg_id, wmid=wait_mid, sid=_sid):
                                                 b._join_success = False
                                                 # Poll 6s thay vì sleep cứng 3s
                                                 for _i in range(12):
@@ -2755,6 +2781,11 @@ async def run_telegram_bot(token: str, active_bots: list):
                                                     if b._join_success:
                                                         break
                                                 b._joining = False
+                                                # Nếu join thất bại, giải phóng bot
+                                                if not b._join_success:
+                                                    if b._session_id == sid:
+                                                        b._telegram_chat_id = None
+                                                        b._session_id       = None
                                                 if b._join_success:
                                                     if url:
                                                         await send(c,
@@ -2772,9 +2803,11 @@ async def run_telegram_bot(token: str, active_bots: list):
                                                             user_msg_id=umid, edit_msg_id=wmid)
 
                                                         # ── Auto-leave sau 10s nếu không phát gì ──
-                                                        async def _auto_leave_idle(b=b, c=c, tc=tc):
+                                                        async def _auto_leave_idle(b=b, c=c, tc=tc, sid=sid):
                                                             await asyncio.sleep(10)
-                                                            # Chỉ leave nếu bot vẫn trong team VÀ không có bài nào đang phát/chờ
+                                                            # Chỉ leave nếu bot vẫn thuộc session này VÀ không có bài nào đang phát/chờ
+                                                            if b._session_id != sid:
+                                                                return   # session đã thay đổi (bot đã được tái dùng)
                                                             is_playing = b._udp_task and not b._udp_task.done()
                                                             has_queue  = not b._track_queue.empty()
                                                             if b.voice_region_id and not is_playing and not has_queue:
@@ -2796,17 +2829,25 @@ async def run_telegram_bot(token: str, active_bots: list):
 
                                         except Exception as ex:
                                             HELLXlog("TEAM", f"Join failed uid={bot.uid}: {ex}")
+                                            # Giải phóng bot nếu exception khi gửi packet
+                                            if bot._telegram_chat_id == chat_id and bot._session_id == _sid:
+                                                bot._telegram_chat_id = None
+                                                bot._session_id       = None
+                                                bot._joining          = False
 
                             if count > 0:
                                 pass  # waiting msg đã gửi, _check() sẽ edit thành kết quả
                             else:
                                 my_joining = [b for b in active_bots if b._joining and b._telegram_chat_id == chat_id]
                                 my_busy    = [b for b in active_bots if b.voice_region_id and b._telegram_chat_id == chat_id]
-                                all_busy   = [b for b in active_bots if b.voice_region_id or b._joining]
+                                others_busy = [b for b in active_bots if b._telegram_chat_id is not None and b._telegram_chat_id != chat_id]
+                                all_busy   = [b for b in active_bots if b.voice_region_id or b._joining or b._telegram_chat_id is not None]
                                 if my_joining:
                                     await send(chat_id, "⏳ <b>Bot của bạn đang xử lý lệnh trước.</b>\n└ Chờ vài giây rồi thử lại.", user_msg_id=user_msg_id, edit_msg_id=wait_mid)
                                 elif my_busy:
                                     await send(chat_id, "❌ <b>Bot của bạn đang trong team!</b>\n└ Dùng <code>/leave</code> trước.", user_msg_id=user_msg_id, edit_msg_id=wait_mid)
+                                elif len(others_busy) == len(active_bots):
+                                    await send(chat_id, "❌ <b>Không có bot rảnh!</b>\n└ Tất cả bot đang được người khác sử dụng.\n└ Thử lại sau ít phút.", user_msg_id=user_msg_id, edit_msg_id=wait_mid)
                                 elif all_busy:
                                     await send(chat_id, "❌ <b>Không có bot rảnh!</b>\n└ Tất cả bot đang được người khác sử dụng.", user_msg_id=user_msg_id, edit_msg_id=wait_mid)
                                 else:
@@ -2828,23 +2869,28 @@ async def run_telegram_bot(token: str, active_bots: list):
 
                             pb_code = parts[1]
 
-                            # Tìm bot rảnh — phải check cả _joining để tránh gửi 2 lần
-                            # khi người dùng spam /pb trước khi lần 1 hoàn thành
+                            # Tìm bot rảnh — phải check cả _joining và _telegram_chat_id
+                            # để đảm bảo không chia sẻ bot giữa 2 người dùng khác nhau
                             wait_mid = await send_waiting(chat_id)
                             pb_count = 0
                             for bot in active_bots:
                                 if bot.writer and not bot.writer.transport.is_closing():
-                                    if not bot.voice_region_id and not bot._joining:
+                                    if (not bot.voice_region_id
+                                            and not bot._joining
+                                            and bot._telegram_chat_id is None):
                                         try:
+                                            # Gán session trước khi gửi packet (tránh race condition)
+                                            _sid_pb = str(_uuid_tg.uuid4())
+                                            bot._telegram_chat_id  = chat_id
+                                            bot._session_id        = _sid_pb
+                                            bot._telegram_notify_cb = send  # đảm bảo luôn mới nhất
+                                            bot._joining           = True
                                             join_pkt = HELLXbuild_join_sq(int(bot.uid), pb_code, bot.key, bot.iv)
                                             bot.writer.write(join_pkt)
                                             await bot.writer.drain()
                                             pb_count += 1
-                                            bot._telegram_chat_id = chat_id
-                                            bot._telegram_notify_cb = send  # đảm bảo luôn mới nhất
-                                            bot._joining = True
 
-                                            async def _check_pb(b=bot, c=chat_id, tc=pb_code, umid=user_msg_id, wmid=wait_mid):
+                                            async def _check_pb(b=bot, c=chat_id, tc=pb_code, umid=user_msg_id, wmid=wait_mid, sid=_sid_pb):
                                                 b._join_success = False
                                                 # Chờ tối đa 6s để nhận join confirm từ server
                                                 # (trước là 3s — dễ miss nếu server lag)
@@ -2853,6 +2899,11 @@ async def run_telegram_bot(token: str, active_bots: list):
                                                     if b._join_success:
                                                         break
                                                 b._joining = False
+                                                # Nếu join thất bại, giải phóng bot
+                                                if not b._join_success:
+                                                    if b._session_id == sid:
+                                                        b._telegram_chat_id = None
+                                                        b._session_id       = None
                                                 HELLXlog("PB", f"_check_pb: uid={b.uid} join_success={b._join_success} voice_region={b.voice_region_id}")
                                                 if b._join_success:
                                                     b._pb_mode = True
@@ -3110,11 +3161,13 @@ async def run_telegram_bot(token: str, active_bots: list):
                                     # _make_exit_pkt chỉ gửi packet thô, không gọi _leave_team()
                                     # → voice_region_id không được clear → status vẫn báo "Trong team".
                                     def _reset_ghost_state(b):
-                                        b.voice_region_id = None
-                                        b.chat_region_id  = None
-                                        b.team_owner_uid  = None
-                                        b.voice_chat_key  = None
-                                        b._joining        = False
+                                        b.voice_region_id    = None
+                                        b.chat_region_id     = None
+                                        b.team_owner_uid     = None
+                                        b.voice_chat_key     = None
+                                        b._joining           = False
+                                        b._telegram_chat_id  = None   # isolation: release ownership
+                                        b._session_id        = None
                                         for _gt in (b._voice_connect_task, b._udp_task,
                                                     b._voice_ping_task, b._progress_task):
                                             if _gt and not _gt.done():
@@ -3217,34 +3270,74 @@ async def run_telegram_bot(token: str, active_bots: list):
                             asyncio.create_task(_do_ghost())
 
                         # ── /play (direct, dành cho bot đang trong team của user) ──
+                        # Hỗ trợ:
+                        #   /play [tên bài hoặc URL]  → tìm kiếm hoặc phát trực tiếp
+                        #   /play [số]                → phát bài số [số] từ search_cache
                         elif text.lower().startswith("/play"):
                             query = text[5:].strip()
                             if not query:
                                 await send(chat_id,
-                                    "❌ <b>Thiếu tên bài hoặc URL!</b>\n"
-                                    "└ <code>/play [tên bài hoặc URL]</code>",
+                                    "❌ <b>Thiếu tên bài hoặc URL!</b>\n\n"
+                                    "📖 <b>Cú pháp:</b>\n"
+                                    "├ <code>/play [tên bài]</code>\n"
+                                    "├ <code>/play [URL]</code>\n"
+                                    "└ <code>/play [số thứ tự]</code> — từ kết quả <code>/search</code>",
                                     user_msg_id=user_msg_id)
                                 continue
-                            # Tìm bot đang trong team của chat_id này
+
+                            # Tìm bot đang trong team của chat_id này, đúng session
                             target_bot = None
                             for b in active_bots:
-                                if b._telegram_chat_id == chat_id and b.voice_region_id:
+                                if (b._telegram_chat_id == chat_id
+                                        and b.voice_region_id
+                                        and b._session_id is not None):
                                     target_bot = b
                                     break
-                            if target_bot:
-                                asyncio.create_task(target_bot._play_from_query(query))
-                                await send(chat_id, f"🎵 <b>Đã thêm vào hàng chờ!</b>\n└ <i>{query[:60]}</i>", user_msg_id=user_msg_id)
-                            else:
+
+                            if not target_bot:
                                 await send(chat_id,
                                     "❌ <b>Bot chưa vào team!</b>\n"
                                     "└ Dùng <code>/join [team_code]</code> trước.",
+                                    user_msg_id=user_msg_id)
+                                continue
+
+                            # Phân tích: nếu là số thứ tự → lấy từ search_cache của chat_id này
+                            play_url   = None
+                            play_title = ""
+                            try:
+                                idx = int(query) - 1
+                                cached = search_cache.get(chat_id, [])
+                                if idx < 0 or idx >= len(cached):
+                                    await send(chat_id,
+                                        f"❌ <b>Số thứ tự không hợp lệ!</b>\n"
+                                        f"└ Kết quả <code>/search</code> của bạn có <b>{len(cached)}</b> bài.",
+                                        user_msg_id=user_msg_id)
+                                    continue
+                                play_url   = cached[idx]["url"]
+                                play_title = cached[idx]["title"]
+                            except ValueError:
+                                # Không phải số → query thông thường
+                                play_url   = None
+                                play_title = query
+
+                            if play_url:
+                                asyncio.create_task(target_bot._play_from_url(play_url, play_title))
+                                await send(chat_id,
+                                    f"🎵 <b>Đã thêm vào hàng chờ!</b>\n└ <i>{play_title[:60]}</i>",
+                                    user_msg_id=user_msg_id)
+                            else:
+                                asyncio.create_task(target_bot._play_from_query(query))
+                                await send(chat_id,
+                                    f"🎵 <b>Đã thêm vào hàng chờ!</b>\n└ <i>{query[:60]}</i>",
                                     user_msg_id=user_msg_id)
 
                         # ── /skip ─────────────────────────────────────────────
                         elif text.lower() == "/skip":
                             target_bot = None
                             for b in active_bots:
-                                if b._telegram_chat_id == chat_id and b.voice_region_id:
+                                if (b._telegram_chat_id == chat_id
+                                        and b.voice_region_id
+                                        and b._session_id is not None):
                                     target_bot = b
                                     break
                             if target_bot:
@@ -3263,7 +3356,9 @@ async def run_telegram_bot(token: str, active_bots: list):
                         elif text.lower() in ("/queue", "/q"):
                             target_bot = None
                             for b in active_bots:
-                                if b._telegram_chat_id == chat_id and b.voice_region_id:
+                                if (b._telegram_chat_id == chat_id
+                                        and b.voice_region_id
+                                        and b._session_id is not None):
                                     target_bot = b
                                     break
                             if target_bot:
@@ -3288,7 +3383,9 @@ async def run_telegram_bot(token: str, active_bots: list):
                         elif text.lower() == "/clear":
                             target_bot = None
                             for b in active_bots:
-                                if b._telegram_chat_id == chat_id and b.voice_region_id:
+                                if (b._telegram_chat_id == chat_id
+                                        and b.voice_region_id
+                                        and b._session_id is not None):
                                     target_bot = b
                                     break
                             if target_bot:
@@ -3301,7 +3398,9 @@ async def run_telegram_bot(token: str, active_bots: list):
                         elif text.lower() == "/leave":
                             left = 0
                             for bot in active_bots:
-                                if bot._telegram_chat_id == chat_id and bot.voice_region_id:
+                                if (bot._telegram_chat_id == chat_id
+                                        and bot.voice_region_id
+                                        and bot._session_id is not None):
                                     asyncio.create_task(bot._leave_team())
                                     left += 1
                             await send(chat_id,

@@ -1293,7 +1293,6 @@ class HELLXBot:
             # Nhảy hết toàn bộ emote → tự rời team
             if self._pb_mode and self.voice_region_id:
                 HELLXlog("EMOTE", "pb_emote_loop: đã nhảy hết emote — tự rời team")
-                # Thông báo Telegram trước khi rời
                 if self._telegram_notify_cb and self._telegram_chat_id:
                     try:
                         await self._telegram_notify_cb(
@@ -1776,31 +1775,28 @@ class HELLXBot:
         except Exception as e:
             HELLXlog("EMOTE", f"Error: {e}")
 
+    # Emote duy nhất dùng cho cả music loop và pb loop
+    MUSIC_EMOTE_ID = 909000010
+
     async def _emote_loop(self):
-        """Cycle qua tất cả emotes trong suốt bài hát (7s/emote), lặp lại từ đầu khi hết list.
-        An toàn với concurrent: thoát ngay khi bị cancel hoặc udp_task đã done.
-        Không chạy khi đang ở pb_mode (pb mode có loop riêng _pb_emote_loop)."""
+        """Lặp 1 emote cố định (MUSIC_EMOTE_ID) suốt bài hát (7s/lần).
+        Thoát ngay khi bị cancel, hết bài, hoặc rời team.
+        Không chạy khi đang ở pb_mode."""
         try:
-            # Guard: nếu đang pb_mode thì không chạy emote loop này
             if self._pb_mode:
                 HELLXlog("EMOTE", "_emote_loop skipped — pb_mode active")
                 return
-            emotes = list(self._emote_ids) if self._emote_ids else [909054004]
-            idx = 0
-            # Delay nhỏ để tránh emote ngay lúc bài vừa bắt đầu (server chưa nhận session)
+            # Delay nhỏ để server nhận session trước khi gửi emote đầu tiên
             await asyncio.sleep(2.0)
             while True:
-                # Dừng khi bài hát kết thúc hoặc không còn trong team
                 if not self.voice_region_id:
                     break
-                if self._pb_mode:   # pb mode chiếm quyền emote
+                if self._pb_mode:
                     break
                 if self._udp_task is None or self._udp_task.done():
                     break
-                await self._trigger_emote(emotes[idx % len(emotes)])
-                idx += 1
-                # 7s giữa các emote — tương tự chodang dance loop
-                # Chia nhỏ sleep để cancel nhanh hơn
+                await self._trigger_emote(self.MUSIC_EMOTE_ID)
+                # 7s giữa mỗi lần — chia nhỏ để cancel nhanh
                 for _ in range(14):
                     await asyncio.sleep(0.5)
                     if self._udp_task is None or self._udp_task.done():
@@ -2117,46 +2113,17 @@ class HELLXBot:
         #
         # loudnorm EBU R128: normalize về -16 LUFS, true peak -1.5 dBFS
         # → bài to sẵn bị giảm, bài nhỏ được kéo lên — không bao giờ clip
-        cmd = [
-            "ffmpeg", "-i", raw_file,
-            "-filter:a", (
-                "loudnorm=I=-16:TP=-1.5:LRA=11,"    # EBU R128 normalize
-                "dynaudnorm=f=200:g=15:p=0.90:m=30"  # smooth micro-variation
-            ),
-            "-map_metadata", "-1",
-            "-c:a", "libopus",
-            "-b:a", "96k",
-            "-application", "audio",
-            "-frame_duration", "20",
-            "-vbr", "on",
-            "-ac", "1", "-ar", "48000",
-            "-f", "data",
-            "-loglevel", "quiet", "pipe:1",
-        ]
         import subprocess as _sp
-        proc = _sp.Popen(cmd, stdout=_sp.PIPE, bufsize=0)
-        # Mỗi opus frame raw ~100–400 bytes, nhưng độ dài biến đổi (VBR)
-        # → đọc theo length-prefixed: 2 byte big-endian length + payload
-        # ffmpeg -f data với libopus xuất từng packet kèm prefix tự động
-        # Tuy nhiên với -f data thuần thì KHÔNG có prefix — ta cần đọc
-        # frame boundary khác cách: dùng ogg muxer rồi parse OGG pages,
-        # HOẶC đơn giản hơn: encode s16le rồi encode opus trong Python
-        # qua subprocess ffmpeg từng chunk.
-        #
-        # Cách đơn giản & đáng tin nhất: pipe s16le ra, encode từng 1920-byte
-        # chunk bằng ffmpeg sub-process nhỏ (1 lần gọi = 1 frame).
-        # Nhưng spawn process mỗi 20ms quá tốn → dùng OGG page parser.
-        #
-        # GIẢI PHÁP THỰC TẾ NHẤT: dùng -f ogg và parse OGG pages để lấy
-        # từng opus packet riêng lẻ mà không cần native binding.
-        proc.terminate(); proc.wait()
-
-        # Re-spawn với OGG muxer để lấy frame boundary rõ ràng
+        # Dùng -f ogg và parse OGG pages để lấy từng opus packet riêng lẻ
+        # mà không cần native binding.
+        # Dùng acompressor thay loudnorm: single-pass, không cần scan toàn file trước
+        # → producer khởi động ngay, không bị delay 2-3s đầu bài
         cmd2 = [
             "ffmpeg", "-i", raw_file,
             "-filter:a", (
-                "loudnorm=I=-16:TP=-1.5:LRA=11,"
-                "dynaudnorm=f=200:g=15:p=0.90:m=30"
+                "acompressor=threshold=-18dB:ratio=4:attack=5:release=200:makeup=3dB,"
+                "highpass=f=40,"            # loại tiếng ồn thấp
+                "volume=1.2"               # boost nhẹ
             ),
             "-c:a", "libopus",
             "-b:a", "96k",
@@ -2322,8 +2289,9 @@ class HELLXBot:
         prod_th.start()
         self._producer_th = prod_th
 
-        # Chờ 200 frames (~4s) trước khi bắt đầu — jitter buffer đủ lớn
-        while audio_q.qsize() < 200 and not self._audio_stop:
+        # Chờ 50 frames (~1s) trước khi bắt đầu — đủ để tránh underrun đầu bài
+        # (trước là 200 frames=4s — quá lâu và không cần thiết với single-pass filter)
+        while audio_q.qsize() < 50 and not self._audio_stop:
             await asyncio.sleep(0.02)
         HELLXlog("VOICE", f"UDP: buffer {audio_q.qsize()} frames → start stream to {ip}:{udp_port}")
 
@@ -2348,8 +2316,8 @@ class HELLXBot:
             return hdr + opus_data
 
         # send_q: timing_thread đẩy packet đã build sẵn vào đây
-        # maxsize=50 (~1s): đủ nhỏ để async loop luôn lấy được frame mới nhất
-        send_q   = _q.Queue(maxsize=50)
+        # maxsize=5 (~100ms): nhỏ hơn → async loop không wake muộn rồi burst
+        send_q   = _q.Queue(maxsize=5)
         _stop_ev = _threading.Event()
 
         def _timing_thread():
@@ -2415,10 +2383,14 @@ class HELLXBot:
                     break
                 pkt = _build_pkt(opus)
                 try:
-                    send_q.put(pkt, timeout=0.5)
+                    # block=True, timeout ngắn: nếu send_q full thì chờ async loop drain
+                    # KHÔNG drop frame — drop frame gây gap 100ms
+                    send_q.put(pkt, block=True, timeout=0.08)
                     loop.call_soon_threadsafe(_send_ev.set)   # ← signal event loop
                 except _q.Full:
-                    pass
+                    # Chỉ drop nếu chờ 80ms vẫn full (event loop bị treo hẳn)
+                    # Reset timeline tránh catch-up burst sau khi recover
+                    next_t = _time.perf_counter() + FRAME_DURATION
                 next_t += FRAME_DURATION
                 sl = next_t - _time.perf_counter()
                 if sl > 0.002:
@@ -2442,24 +2414,22 @@ class HELLXBot:
                 except asyncio.TimeoutError:
                     continue
                 _send_ev.clear()
-                # Drain toàn bộ send_q trong 1 lần wake (burst drain)
-                while True:
-                    try:
-                        pkt = send_q.get_nowait()
-                    except _q.Empty:
-                        break
-                    if pkt is None:
-                        HELLXlog("VOICE", f"UDP: hết nhạc ({sent} frames)")
-                        self._audio_stop = True
-                        break
-                    try:
-                        udp.sendto(pkt, (ip, udp_port))
-                    except OSError as e:
-                        HELLXlog("VOICE", f"UDP: sock err: {e}")
-                    sent += 1
-                    self._track_current_frame = sent
-                if self._audio_stop:
+                # Lấy 1 frame mỗi lần wake — KHÔNG burst drain nhiều frame cùng lúc
+                # Burst drain gây server nhận nhiều packet liên tiếp → decode overrun
+                try:
+                    pkt = send_q.get_nowait()
+                except _q.Empty:
+                    continue
+                if pkt is None:
+                    HELLXlog("VOICE", f"UDP: hết nhạc ({sent} frames)")
+                    self._audio_stop = True
                     break
+                try:
+                    udp.sendto(pkt, (ip, udp_port))
+                except OSError as e:
+                    HELLXlog("VOICE", f"UDP: sock err: {e}")
+                sent += 1
+                self._track_current_frame = sent
 
         except asyncio.CancelledError:
             self._stopped_frame = sent

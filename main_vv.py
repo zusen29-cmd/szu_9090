@@ -2601,11 +2601,14 @@ async def run_telegram_bot(token: str, active_bots: list):
                             continue
 
                         # ── Chặn toàn bộ lệnh nếu đang bảo trì (trừ admin) ──
+                        # Chỉ reply khi là lệnh (bắt đầu bằng /)
+                        # Tin nhắn thường không phải lệnh → bỏ qua hoàn toàn
                         if maintenance_mode and not is_admin:
-                            await send(chat_id,
-                                "🔧 <b>Bot đang bảo trì!</b>\n"
-                                "└ Vui lòng thử lại sau ít phút.",
-                                user_msg_id=user_msg_id)
+                            if text.startswith("/"):
+                                await send(chat_id,
+                                    "🔧 <b>Bot đang bảo trì!</b>\n"
+                                    "└ Vui lòng thử lại sau ít phút.",
+                                    user_msg_id=user_msg_id)
                             continue
 
                         # ── /start ──────────────────────────────────────────

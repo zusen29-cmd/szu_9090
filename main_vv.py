@@ -2484,10 +2484,12 @@ async def run_telegram_bot(token: str, active_bots: list):
     import subprocess
     import json as _json
 
-    offset       = 0
-    url          = f"https://api.telegram.org/bot{token}/getUpdates"
-    send_url     = f"https://api.telegram.org/bot{token}/sendMessage"
-    search_cache = {}   # chat_id -> list of {"title", "channel", "url", "duration"}
+    offset           = 0
+    url              = f"https://api.telegram.org/bot{token}/getUpdates"
+    send_url         = f"https://api.telegram.org/bot{token}/sendMessage"
+    search_cache     = {}     # chat_id -> list of {"title", "channel", "url", "duration"}
+    maintenance_mode = False  # Chế độ bảo trì — chỉ admin dùng được
+    ADMIN_ID         = 1804489430
 
     HELLXlog("TELEGRAM", "Polling started...")
 
@@ -2551,22 +2553,35 @@ async def run_telegram_bot(token: str, active_bots: list):
     for _b in active_bots:
         _b._telegram_notify_cb = send
 
-    # Bỏ qua toàn bộ update cũ khi khởi động (tránh reply tin nhắn tồn đọng)
-    async with aiohttp.ClientSession() as _skip_sess:
+    async def _skip_pending_updates():
+        """Bỏ qua toàn bộ update tồn đọng, trả về offset mới nhất.
+        Gọi mỗi lần (re)connect — kể cả sau khi bot offline rồi online lại —
+        để tránh xử lý lại lệnh cũ.
+        """
+        nonlocal offset
         try:
-            async with _skip_sess.get(
-                f"{url}?offset=-1&timeout=0", timeout=aiohttp.ClientTimeout(total=10)
-            ) as _r:
-                _d = await _r.json()
-                _results = _d.get("result", [])
-                if _results:
-                    offset = _results[-1]["update_id"] + 1
-                    HELLXlog("TELEGRAM", f"Skipped pending updates, offset={offset}")
+            async with aiohttp.ClientSession() as _s:
+                async with _s.get(
+                    f"{url}?offset=-1&timeout=0",
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as _r:
+                    _d = await _r.json(content_type=None)
+                    _results = _d.get("result", [])
+                    if _results:
+                        offset = _results[-1]["update_id"] + 1
+                        HELLXlog("TELEGRAM", f"Skipped pending updates → offset={offset}")
+                    else:
+                        HELLXlog("TELEGRAM", "No pending updates to skip")
         except Exception as _e:
             HELLXlog("TELEGRAM", f"skip_pending failed (non-critical): {_e}")
 
+    # Bỏ qua toàn bộ update cũ khi khởi động lần đầu
+    await _skip_pending_updates()
+
     while True:
         try:
+          # Mỗi lần reconnect (session mới) → skip lại để tránh replay tin nhắn cũ
+          await _skip_pending_updates()
           async with aiohttp.ClientSession() as session:
             while True:
                 try:
@@ -2593,6 +2608,35 @@ async def run_telegram_bot(token: str, active_bots: list):
                         if not text or not chat_id:
                             continue
                         HELLXlog("TELEGRAM", f"CMD: {text!r} from chat_id={chat_id}")
+
+                        is_admin = (chat_id == ADMIN_ID)
+
+                        # ── /maintenance (chỉ admin) ─────────────────────────
+                        if text.lower() in ("/maintenance on", "/maintenance off"):
+                            if not is_admin:
+                                await send(chat_id, "🚫 <b>Bạn không có quyền dùng lệnh này.</b>", user_msg_id=user_msg_id)
+                                continue
+                            maintenance_mode = text.lower().endswith("on")
+                            if maintenance_mode:
+                                await send(chat_id,
+                                    "🔧 <b>Chế độ bảo trì đã BẬT.</b>\n"
+                                    "└ Tất cả người dùng không thể dùng bot cho đến khi tắt.\n"
+                                    "└ Tắt: <code>/maintenance off</code>",
+                                    user_msg_id=user_msg_id)
+                            else:
+                                await send(chat_id,
+                                    "✅ <b>Chế độ bảo trì đã TẮT.</b>\n"
+                                    "└ Người dùng có thể sử dụng bot bình thường.",
+                                    user_msg_id=user_msg_id)
+                            continue
+
+                        # ── Chặn toàn bộ lệnh nếu đang bảo trì (trừ admin) ──
+                        if maintenance_mode and not is_admin:
+                            await send(chat_id,
+                                "🔧 <b>Bot đang bảo trì!</b>\n"
+                                "└ Vui lòng thử lại sau ít phút.",
+                                user_msg_id=user_msg_id)
+                            continue
 
                         # ── /start ──────────────────────────────────────────
                         if text == "/start":

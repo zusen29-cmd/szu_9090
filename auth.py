@@ -79,12 +79,11 @@ _AES_KEY = b'Yg&tc%DEuh6%Zc^8'
 _AES_IV  = b'6oyZDr22E3ychjM%'
 
 _DEVICE_POOL = [
-    ("SM-G998B",   "Adreno (TM) 660",       "Android OS 12 / API-31 (SP1A.210812.016/G998BXXU5BULA)"),
-    ("2201122G",   "Adreno (TM) 730",       "Android OS 13 / API-33 (TKQ1.220905.001/V14.0.6.0.TKMCNXM)"),
-    ("RMX3700",    "Mali-G710 MC10",         "Android OS 14 / API-34 (UKQ1.230924.001/RMX3700.14.C.01)"),
-    ("CPH2451",    "Adreno (TM) 740",       "Android OS 13 / API-33 (TP1A.220905.001/C.19)"),
-    ("24094RAD4G", "Adreno (TM) 720",       "Android OS 14 / API-34 (UKQ1.230924.001/OS1.0.6.6.UNACNXM)"),
-    ("Xiaomi 24094RAD4G", "PowerVR B-Series BXM-8-256", "Android OS 16 / API-36 (BP2A.250605.031.A3/OS3.0.303.0.WOQMIXM)"),
+    ("SM-G998B",   "Adreno (TM) 660",  "Android OS 12 / API-31 (SP1A.210812.016/G998BXXU5BULA)"),
+    ("2201122G",   "Adreno (TM) 730",  "Android OS 13 / API-33 (TKQ1.220905.001/V14.0.6.0.TKMCNXM)"),
+    ("RMX3700",    "Mali-G710 MC10",    "Android OS 14 / API-34 (UKQ1.230924.001/RMX3700.14.C.01)"),
+    ("CPH2451",    "Adreno (TM) 740",  "Android OS 13 / API-33 (TP1A.220905.001/C.19)"),
+    ("24094RAD4G", "Adreno (TM) 720",  "Android OS 14 / API-34 (UKQ1.230924.001/OS1.0.6.6.UNACNXM)"),
 ]
 
 import random as _random, json as _json, os as _os, uuid as _uuid
@@ -110,8 +109,9 @@ def _get_device(uid: str) -> dict:
         "system_software":  os_ver,
         "screen_width":     _random.choice([1080, 1440, 2400]),
         "screen_height":    _random.choice([2400, 3200, 1080]),
-        "screen_dpi":       str(_random.randint(300, 450)),
-        "memory":           _random.randint(3000, 8000),
+        "screen_dpi":       str(_random.randint(300, 420)),
+        "memory":           _random.randint(3000, 7500),
+        "processor":        f"ARM64 FP ASIMD AES | {_random.randint(2200, 3200)} | {_random.randint(6, 12)}",
     }
     devices[str(uid)] = dev
     try:
@@ -121,39 +121,18 @@ def _get_device(uid: str) -> dict:
         pass
     return dev
 
-def _enc_fixed64_nested(subfields: dict) -> bytes:
-    """Encode nested proto với fixed64 (wire type 1) cho các số 64-bit."""
-    import struct as _s
-    buf = bytearray()
-    for fn, val in subfields.items():
-        if isinstance(val, int) and val.bit_length() > 32:
-            # fixed64 wire type 1
-            buf.extend(HELLXenc_varint((fn << 3) | 1))
-            buf.extend(_s.pack('<Q', val))
-        else:
-            # varint wire type 0
-            buf.extend(HELLXenc_varint((fn << 3) | 0))
-            buf.extend(HELLXenc_varint(val))
-    return bytes(buf)
-
 def HELLXbuild_login_payload(open_id, access_token, version, client_ip, city, uid=""):
     from datetime import datetime
     dev = _get_device(uid)
-
-    # Field 15: nested message với sub-field 8 là fixed64 (processor info)
-    _f15 = _enc_fixed64_nested({8: 6000273685381728595, 4: 56, 6: 2082484272})
-    # Field 102: nested message với sub-field 2 là fixed64
-    _f102 = _enc_fixed64_nested({2: 3459899602042491143})
-
     fields = {
         3:  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        4:  "free fire", 5: 1, 7: str(version),
+        4:  "free fire", 5: 4, 7: str(version),
         8:  dev["system_software"],
-        9:  "Handheld", 10: "Viettel", 11: "CarrierDataNetwork",
+        9:  "Handheld", 10: "Viettel", 11: "WIFI",
         12: dev["screen_width"],
         13: dev["screen_height"],
         14: dev["screen_dpi"],
-        15: _f15,
+        15: dev["processor"],
         16: dev["memory"],
         17: dev["gpu_renderer"],
         18: "OpenGL ES 3.2 build 25.1@6715691",
@@ -162,25 +141,25 @@ def HELLXbuild_login_payload(open_id, access_token, version, client_ip, city, ui
         21: "vn", 22: str(open_id), 23: "4", 24: "Handheld",
         25: dev["model"], 26: "VN",
         29: str(access_token), 30: 1,
-        41: "Viettel", 42: "4G",
+        41: "Viettel", 42: "WIFI",
         57: "7428b253defc164018c604a1ebbfebdf",
-        60: 233141, 61: 168506, 62: 902,
-        64: 169031, 65: 233141, 66: 169031, 67: 233141,
+        60: 233141, 61: 172590, 62: 902,
+        64: 173114, 65: 233141, 66: 173114, 67: 233141,
         73: 3,
         74: "/data/app/~~OOxSMPtiZSaEIgYJjPoHOg==/com.dts.freefireth-KkAAAdjU2FG5Ts4HwgDgCw==/lib/arm64",
         76: 1,
         77: "b8e0cd5e295eee42f5860d3c86e483dd|/data/app/~~OOxSMPtiZSaEIgYJjPoHOg==/com.dts.freefireth-KkAAAdjU2FG5Ts4HwgDgCw==/base.apk",
         78: 3, 79: 2, 81: "64", 83: "2019121229", 85: 3,
         86: "OpenGLES2", 87: 8191, 88: 4,
-        90: city, 91: "SG", 92: 28014, 93: "android",
-        94: "KqsHT9JbucQCyijWR+iBNzhgSeFdWIXf0Vw1r8Fr6ZGoY7Rt3T6NnHQeS01JZUGgEKGdKoGQihZmicHaA6H/7DIa68kuwuKu6IVzvGTBBeu/z2Je",
-        95: 111207,
+        90: city, 91: "SG", 92: 10968, 93: "android",
+        94: "KqsHT0Q7h333TG5PRgHHMPeY52YAbiB2/CUjX28YaEK6kGm0ieehpzRhEeZ1N/GP2hWAoRRtOvXk8DqwEQgsJ2n+ohtc18X5bJZ6IS8WNFZf7sZI",
+        95: 111107,
         96: "{\"cur_rate\":[60,90,120],\"support_etc2\":false}",
-        97: 1, 99: "0", 100: "4",
-        102: _f102,
-        103: 1, 104: 24511, 105: 1,
-        106: "https://dl.gmc.freefiremobile.com/live/ABHotUpdates/|https://core-gmc.freefiremobile.com/live/ABHotUpdates/|ac2c27398b1d5d95a4b6b6e04fa94066",
-        107: "1.eaed02dd9f66cfa5",
+        97: 1, 99: "4", 100: "4",
+        102: "4a501646550a090965",
+        103: 1, 104: 1070, 105: 1,
+        106: "https://dl.ak.freefiremobile.com/live/ABHotUpdates/|https://core-ak.freefiremobile.com/live/ABHotUpdates/|9a9a493d643462570dc50320b28533d0",
+        107: "1.af7c82fd80a978e6",
     }
     proto_bytes = HELLXcreate_proto(fields)
     return AES.new(_AES_KEY, AES.MODE_CBC, _AES_IV).encrypt(pad(proto_bytes, AES.block_size))

@@ -121,18 +121,39 @@ def _get_device(uid: str) -> dict:
         pass
     return dev
 
+def _enc_fixed64_nested(subfields: dict) -> bytes:
+    """Encode nested proto với fixed64 (wire type 1) cho các số 64-bit."""
+    import struct as _s
+    buf = bytearray()
+    for fn, val in subfields.items():
+        if isinstance(val, int) and val.bit_length() > 32:
+            # fixed64 wire type 1
+            buf.extend(HELLXenc_varint((fn << 3) | 1))
+            buf.extend(_s.pack('<Q', val))
+        else:
+            # varint wire type 0
+            buf.extend(HELLXenc_varint((fn << 3) | 0))
+            buf.extend(HELLXenc_varint(val))
+    return bytes(buf)
+
 def HELLXbuild_login_payload(open_id, access_token, version, client_ip, city, uid=""):
     from datetime import datetime
     dev = _get_device(uid)
+
+    # Field 15: nested message với sub-field 8 là fixed64 (processor info)
+    _f15 = _enc_fixed64_nested({8: 6000273685381728595, 4: 56, 6: 2082484272})
+    # Field 102: nested message với sub-field 2 là fixed64
+    _f102 = _enc_fixed64_nested({2: 3459899602042491143})
+
     fields = {
         3:  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        4:  "free fire", 5: 4, 7: str(version),
+        4:  "free fire", 5: 1, 7: str(version),
         8:  dev["system_software"],
         9:  "Handheld", 10: "Viettel", 11: "CarrierDataNetwork",
         12: dev["screen_width"],
         13: dev["screen_height"],
         14: dev["screen_dpi"],
-        15: {8: 6000273685381728595, 4: 56, 6: 2082484272},
+        15: _f15,
         16: dev["memory"],
         17: dev["gpu_renderer"],
         18: "OpenGL ES 3.2 build 25.1@6715691",
@@ -155,8 +176,8 @@ def HELLXbuild_login_payload(open_id, access_token, version, client_ip, city, ui
         94: "KqsHT9JbucQCyijWR+iBNzhgSeFdWIXf0Vw1r8Fr6ZGoY7Rt3T6NnHQeS01JZUGgEKGdKoGQihZmicHaA6H/7DIa68kuwuKu6IVzvGTBBeu/z2Je",
         95: 111207,
         96: "{\"cur_rate\":[60,90,120],\"support_etc2\":false}",
-        97: 1, 99: "4", 100: "4",
-        102: {2: 3459899602042491143},
+        97: 1, 99: "0", 100: "4",
+        102: _f102,
         103: 1, 104: 24511, 105: 1,
         106: "https://dl.gmc.freefiremobile.com/live/ABHotUpdates/|https://core-gmc.freefiremobile.com/live/ABHotUpdates/|ac2c27398b1d5d95a4b6b6e04fa94066",
         107: "1.eaed02dd9f66cfa5",

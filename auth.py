@@ -121,48 +121,50 @@ def _get_device(uid: str) -> dict:
         pass
     return dev
 
+from datetime import datetime
+
+_BASE_FIELDS = {
+    4: "free fire", 5: 1, 9: "Handheld", 10: "Viettel", 11: "CarrierDataNetwork",
+    18: "OpenGL ES 3.2 build 25.1@6715691", 21: "vn", 23: "4", 24: "Handheld",
+    26: "VN", 30: 1, 41: "Viettel", 42: "4G",
+    57: "7428b253defc164018c604a1ebbfebdf",
+    60: 233141, 61: 169421, 62: 902, 64: 169945, 65: 233141, 66: 169945, 67: 233141,
+    73: 3,
+    74: "/data/app/~~OOxSMPtiZSaEIgYJjPoHOg==/com.dts.freefireth-KkAAAdjU2FG5Ts4HwgDgCw==/lib/arm64",
+    76: 1,
+    77: "b8e0cd5e295eee42f5860d3c86e483dd|/data/app/~~OOxSMPtiZSaEIgYJjPoHOg==/com.dts.freefireth-KkAAAdjU2FG5Ts4HwgDgCw==/base.apk",
+    78: 3, 79: 2, 81: "64", 83: "2019121229", 85: 3, 86: "OpenGLES2", 87: 8191, 88: 4,
+    91: "SG", 92: 9339, 93: "android",
+    94: "KqsHTw6ig4Gc39MBHQa+5VKNNU8oo4ak8w0NllWLvoUr+2pIZc1TeWooIvcbn49btS06j6slKvWIX9RN9g+0k5QhGwsfQ6S0ZCVXh8Tr9/PC43kX",
+    95: 111207, 96: '{"cur_rate":[60,90,120],"support_etc2":false}',
+    97: 1, 99: "4", 100: "4", 102: "", 103: 1, 104: 53896, 105: 1,
+    106: "https://dl.gmc.freefiremobile.com/live/ABHotUpdates/|https://core-gmc.freefiremobile.com/live/ABHotUpdates/|ac2c27398b1d5d95a4b6b6e04fa94066",
+    107: "1.eaed02dd9f66cfa5",
+}
+
 def HELLXbuild_login_payload(open_id, access_token, version, client_ip, city, uid=""):
-    from datetime import datetime
     dev = _get_device(uid)
     fields = {
-        3:  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        4:  "free fire", 5: 4, 7: str(version),
-        8:  dev["system_software"],
-        9:  "Handheld", 10: "Viettel", 11: "WIFI",
+        **_BASE_FIELDS,
+        3: datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        7: str(version),
+        8: dev["system_software"],
         12: dev["screen_width"],
         13: dev["screen_height"],
         14: dev["screen_dpi"],
         15: dev["processor"],
         16: dev["memory"],
         17: dev["gpu_renderer"],
-        18: "OpenGL ES 3.2 build 25.1@6715691",
         19: dev["unique_device_id"],
         20: client_ip,
-        21: "vn", 22: str(open_id), 23: "4", 24: "Handheld",
-        25: dev["model"], 26: "VN",
-        29: str(access_token), 30: 1,
-        41: "Viettel", 42: "WIFI",
-        57: "7428b253defc164018c604a1ebbfebdf",
-        60: 233141, 61: 172590, 62: 902,
-        64: 173114, 65: 233141, 66: 173114, 67: 233141,
-        73: 3,
-        74: "/data/app/~~OOxSMPtiZSaEIgYJjPoHOg==/com.dts.freefireth-KkAAAdjU2FG5Ts4HwgDgCw==/lib/arm64",
-        76: 1,
-        77: "b8e0cd5e295eee42f5860d3c86e483dd|/data/app/~~OOxSMPtiZSaEIgYJjPoHOg==/com.dts.freefireth-KkAAAdjU2FG5Ts4HwgDgCw==/base.apk",
-        78: 3, 79: 2, 81: "64", 83: "2019121229", 85: 3,
-        86: "OpenGLES2", 87: 8191, 88: 4,
-        90: city, 91: "SG", 92: 10968, 93: "android",
-        94: "KqsHT0Q7h333TG5PRgHHMPeY52YAbiB2/CUjX28YaEK6kGm0ieehpzRhEeZ1N/GP2hWAoRRtOvXk8DqwEQgsJ2n+ohtc18X5bJZ6IS8WNFZf7sZI",
-        95: 111107,
-        96: "{\"cur_rate\":[60,90,120],\"support_etc2\":false}",
-        97: 1, 99: "4", 100: "4",
-        102: "4a501646550a090965",
-        103: 1, 104: 1070, 105: 1,
-        106: "https://dl.ak.freefiremobile.com/live/ABHotUpdates/|https://core-ak.freefiremobile.com/live/ABHotUpdates/|9a9a493d643462570dc50320b28533d0",
-        107: "1.af7c82fd80a978e6",
+        22: str(open_id),
+        25: dev["model"],
+        29: str(access_token),
+        90: city,
     }
     proto_bytes = HELLXcreate_proto(fields)
     return AES.new(_AES_KEY, AES.MODE_CBC, _AES_IV).encrypt(pad(proto_bytes, AES.block_size))
+
 
 HELLXbuild_major_login           = HELLXbuild_login_payload
 HELLXbuild_get_login_data_payload = HELLXbuild_login_payload

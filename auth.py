@@ -124,7 +124,7 @@ def _get_device(uid: str) -> dict:
 from datetime import datetime
 
 _BASE_FIELDS = {
-    4: "free fire", 5: 1, 9: "Handheld", 10: "Viettel", 11: "CarrierDataNetwork",
+    4: "free fire", 5: 4, 9: "Handheld", 10: "Viettel", 11: "CarrierDataNetwork",
     18: "OpenGL ES 3.2 build 25.1@6715691", 21: "vn", 23: "4", 24: "Handheld",
     26: "VN", 30: 1, 41: "Viettel", 42: "4G",
     57: "7428b253defc164018c604a1ebbfebdf",
